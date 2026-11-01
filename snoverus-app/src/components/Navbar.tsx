@@ -73,7 +73,7 @@ export default function Navbar() {
         setUserRole(rolActual);
 
         let activeSindicato = profile.sindicatos ? (Array.isArray(profile.sindicatos) ? profile.sindicatos[0] : profile.sindicatos) : null;
-
+        
         if (rolActual === 'superadmin') {
           const { data: allSindicatos } = await supabase.from('sindicatos').select('*');
           if (allSindicatos) setSindicatos(allSindicatos);
@@ -83,8 +83,14 @@ export default function Navbar() {
              const found = allSindicatos.find(s => String(s.id) === String(cachedTenantId));
              if (found) activeSindicato = found;
           }
+          
+          // Fallback si no hay nada en cache
+          if (!activeSindicato && allSindicatos && allSindicatos.length > 0) {
+            activeSindicato = allSindicatos[0];
+          }
         } else {
-          if (activeSindicato) localStorage.setItem('sindicato_activo', activeSindicato.id);
+          // Si es socio o admin normal, usa su relación de perfil
+          activeSindicato = profile.sindicatos ? (Array.isArray(profile.sindicatos) ? profile.sindicatos[0] : profile.sindicatos) : null;
         }
 
         if (activeSindicato) {
@@ -125,6 +131,7 @@ export default function Navbar() {
       const supabase = createClient();
       await supabase.auth.signOut();
     } catch (err) {}
+    localStorage.removeItem('sindicato_activo');
     document.cookie = 'sb-sindicato-session=; path=/; max-age=0;';
     document.cookie = 'sb-sindicato-rol=; path=/; max-age=0;';
     router.push('/');
@@ -173,11 +180,11 @@ export default function Navbar() {
 
   return (
     <>
-      {/* NAVBAR */}
+      {/* NAVBAR CON DISEÑO PREMIUM DARK (Sin grises extraños) */}
       <nav className="fixed top-0 w-full z-[100] transition-all duration-300 bg-[#070709] border-b border-white/10 shadow-[0_4px_25px_rgba(0,0,0,0.8)]">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-[76px]">
-
+            
             {/* 1. LADO IZQUIERDO: LOGO */}
             <div className="flex-shrink-0 flex items-center w-auto lg:w-1/4">
               {userRole === 'superadmin' ? (
@@ -195,7 +202,7 @@ export default function Navbar() {
                   </button>
 
                   {menuOpen && (
-                    <div className="absolute left-0 mt-2 w-[300px] bg-[#121216] border border-white/10 rounded-2xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2">
+                    <div className="absolute left-0 mt-2 w-[300px] bg-[#121216] border border-white/10 rounded-2xl shadow-2xl p-2 z-50">
                       <div className="space-y-1 max-h-56 overflow-y-auto custom-scrollbar p-1">
                         {sindicatos.map(s => (
                           <button key={s.id} onClick={() => seleccionarSindicato(s)} className={`w-full text-left px-4 py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-between ${tenantId === s.id ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30' : 'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
@@ -215,9 +222,6 @@ export default function Navbar() {
                 <button onClick={() => setShowTenantModal(true)} className="group flex items-center gap-3 p-1.5 rounded-2xl hover:bg-white/5 transition-all focus:outline-none">
                   <div className="h-10 w-10 rounded-xl overflow-hidden border border-white/10 bg-black p-0.5 shadow-md relative transition-transform group-hover:scale-105">
                     <img src={tenantLogo} alt={tenantName} className="h-full w-full object-cover rounded-lg" />
-                    <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
-                      <span className="text-white text-xs">✏️</span>
-                    </div>
                   </div>
                   <span className="font-bold text-[15px] tracking-tight text-white hidden sm:block group-hover:text-yellow-400 transition-colors">{tenantName}</span>
                 </button>
@@ -231,7 +235,7 @@ export default function Navbar() {
               )}
             </div>
 
-            {/* 2. CENTRO: NAVEGACIÓN */}
+            {/* 2. CENTRO: NAVEGACIÓN FLOTANTE LIMPIA */}
             <div className="hidden lg:flex flex-1 items-center justify-center gap-1">
               <Link href="/dashboard" className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 transition-all">Inicio</Link>
               <Link href="/dashboard/beneficios" className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 transition-all">Beneficios</Link>
@@ -242,7 +246,7 @@ export default function Navbar() {
               {/* MEGAMENÚ */}
               <div className="relative group flex items-center h-[76px]">
                 <button className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium text-slate-300 group-hover:text-white group-hover:bg-white/5 transition-all outline-none">
-                  Módulos
+                  Módulos 
                   <svg className="w-3.5 h-3.5 opacity-70 group-hover:rotate-180 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
                 </button>
 
@@ -285,9 +289,9 @@ export default function Navbar() {
               </div>
             </div>
 
-            {/* 3. LADO DERECHO: PERFIL Y ADMIN */}
+            {/* LADO DERECHO */}
             <div className="flex items-center justify-end gap-5 w-auto lg:w-1/4">
-
+              
               <div className="hidden xl:flex items-center">
                 {userRole === 'superadmin' && (
                   <Link href="/superadmin" className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 hover:text-white transition-colors mr-6">SaaS</Link>
@@ -301,8 +305,7 @@ export default function Navbar() {
 
               <div className="flex items-center gap-4">
                 <Campanita />
-
-                {/* PERFIL CON COLOR POR ROL */}
+                
                 <div className="hidden sm:flex items-center gap-3 cursor-pointer group" onClick={() => router.push('/dashboard/perfil')}>
                   <div className="flex flex-col items-end">
                     <span className="text-sm font-semibold text-white group-hover:text-white/80 transition-colors leading-tight">{userName}</span>
@@ -311,9 +314,8 @@ export default function Navbar() {
                       {getRoleNameUI(userRole)}
                     </span>
                   </div>
-
-                  {/* Avatar con borde y glow según rol */}
-                  <div className={`h-9 w-9 rounded-xl bg-black border flex items-center justify-center text-xs font-bold text-white transition-all ${rolColor.border} ${rolColor.glow}`}>
+                  
+                  <div className="h-9 w-9 rounded-xl bg-black border border-white/15 flex items-center justify-center text-xs font-bold text-white shadow-md group-hover:border-blue-400 transition-all">
                     {iniciales}
                   </div>
                 </div>
@@ -324,8 +326,8 @@ export default function Navbar() {
 
                 {/* HAMBURGUESA MÓVIL */}
                 <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="lg:hidden text-slate-300 hover:text-white transition-colors p-2 rounded-xl bg-white/5 active:scale-95">
-                  {isMobileMenuOpen
-                    ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                  {isMobileMenuOpen 
+                    ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg> 
                     : <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
                   }
                 </button>
@@ -336,39 +338,27 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* Espaciado para compensar navbar fija */}
+      {/* Espaciado transparente para compensar la barra fija */}
       <div className="h-[76px] hidden lg:block bg-transparent pointer-events-none"></div>
 
-      {/* MENÚ MÓVIL con indicador de rol */}
+      {/* --- MENÚ MÓVIL --- */}
       {isMobileMenuOpen && (
         <div className="lg:hidden fixed inset-0 top-[76px] z-[90] bg-[#070709] flex flex-col overflow-y-auto animate-in fade-in duration-200">
-
-          {/* Cabecera con nombre y rol en móvil */}
-          <div className={`mx-6 mt-6 mb-2 p-4 rounded-2xl border ${rolColor.border} ${rolColor.bg} flex items-center gap-3`}>
-            <div className={`h-10 w-10 rounded-xl bg-black border flex items-center justify-center text-sm font-bold text-white ${rolColor.border} ${rolColor.glow}`}>
-              {iniciales}
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-white">{userName}</p>
-              <p className={`text-[10px] font-bold uppercase tracking-widest ${rolColor.text}`}>{getRoleNameUI(userRole)}</p>
-            </div>
-          </div>
-
-          <div className="flex flex-col px-6 py-4 space-y-3 pb-32">
+          <div className="flex flex-col px-6 py-8 space-y-3 pb-32">
             <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard" className="text-base font-semibold text-white p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all">🏠 Inicio</Link>
             <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/credencial" className="text-base font-semibold text-white p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all">🪪 Mi Credencial Digital</Link>
             <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/asistencia" className="text-base font-semibold text-white p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all">📅 Escáner de Asistencia</Link>
             <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/beneficios" className="text-base font-semibold text-white p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all">🎁 Beneficios</Link>
             <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/chat-legal" className="text-base font-semibold text-blue-300 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">🤖 Asistente Legal AI</Link>
-
-            <div className="my-2 border-t border-white/10"></div>
-
+            
+            <div className="my-4 border-t border-white/10"></div>
+            
             {isAdminOrSuper && (
-              <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/admin" className="text-sm font-semibold text-white p-4 rounded-xl bg-white/10 border border-white/10 flex justify-center hover:bg-white/15 transition-all">
+              <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/admin" className="text-sm font-semibold text-white p-4 rounded-xl bg-white/10 border border-white/10 flex justify-center mb-2 hover:bg-white/15 transition-all">
                 ⚙️ Panel Administrativo
               </Link>
             )}
-
+            
             <button onClick={handleLogout} className="text-sm font-semibold text-red-400 p-4 rounded-xl bg-red-500/10 border border-red-500/20 transition-colors flex justify-center">
               🚪 Cerrar Sesión
             </button>

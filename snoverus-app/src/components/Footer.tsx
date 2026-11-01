@@ -82,11 +82,11 @@ export default function Footer() {
         <div>
           <h4 className="text-white font-bold mb-4 flex items-center gap-2">🔗 Enlaces Rápidos</h4>
           <ul className="space-y-2 text-sm">
-            <li><Link href="/dashboard" className="hover:text-blue-400 transition-colors">• Inicio del Portal</Link></li>
-            <li><Link href="/dashboard/beneficios" className="hover:text-blue-400 transition-colors">• Catálogo de Beneficios</Link></li>
-            <li><Link href="/dashboard/legal" className="hover:text-blue-400 transition-colors">• Asesoría Legal</Link></li>
-            <li><Link href="/dashboard/actas" className="hover:text-blue-400 transition-colors">• Transparencia y Actas</Link></li>
-            <li><Link href="/dashboard/soporte" className="hover:text-blue-400 transition-colors">• Soporte Técnico</Link></li>
+            <li><Link href="/dashboard" className="hover:text-blue-400 transition-colors">Inicio del Portal</Link></li>
+            <li><Link href="/dashboard/beneficios" className="hover:text-blue-400 transition-colors">Catálogo de Beneficios</Link></li>
+            <li><Link href="/dashboard/legal" className="hover:text-blue-400 transition-colors">Asesoría Legal</Link></li>
+            <li><Link href="/dashboard/actas" className="hover:text-blue-400 transition-colors">Transparencia y Actas</Link></li>
+            <li><Link href="/dashboard/soporte" className="hover:text-blue-400 transition-colors">Soporte Técnico</Link></li>
           </ul>
         </div>
 
