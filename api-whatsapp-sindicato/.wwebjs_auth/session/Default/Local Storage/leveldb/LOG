@@ -1,0 +1,5 @@
+2026/09/20-14:55:03.880 2cc8 Creating DB C:\Users\taemi\OneDrive\Desktop\Snoverus\api-whatsapp-sindicato\.wwebjs_auth\session\Default\Local Storage\leveldb since it was missing.
+2026/09/20-14:55:03.940 2cc8 Reusing MANIFEST C:\Users\taemi\OneDrive\Desktop\Snoverus\api-whatsapp-sindicato\.wwebjs_auth\session\Default\Local Storage\leveldb/MANIFEST-000001
+2026/09/20-22:09:17.473 2cc8 Level-0 table #5: started
+2026/09/20-22:09:18.404 2cc8 Level-0 table #5: 17788 bytes OK
+2026/09/20-22:09:18.439 2cc8 Delete type=0 #3
