@@ -133,9 +133,9 @@ export default function BeneficiosSmartPage() {
         message: `El socio con RUT ${socioInfo.rut} ha solicitado el convenio ${beneficio.titulo} (${beneficio.descuento}).`
       };
 
-      // 🚨 USO DEL SERVICE ID PRIMARY CORRECTO: service_kjliawo
+      // 🚨 USO DEL SERVICE ID PRIMARY CORRECTO: service_thw7gfn
       const respuesta = await emailjs.send(
-        'service_kjliawo', 
+        'service_thw7gfn', 
         'template_ot9airk', 
         templateParams,
         'GG3tS19diXKenuD_-'
@@ -147,19 +147,20 @@ export default function BeneficiosSmartPage() {
     } catch (err: any) {
       console.warn("EmailJS con restricción (412). Resguardando en Supabase...", err);
       
-      // Fallback a Supabase para garantizar registro sin bloqueos al socio
+      // Fallback a Supabase utilizando la tabla 'solicitudes_beneficios' correctamente estructurada
       try {
         const supabase = createClient();
         await supabase.from('solicitudes_beneficios').insert([{
           sindicato_id: sindicatoIdActual,
           beneficio_id: beneficio.id,
-          rut_socio: socioInfo.rut,
-          email_socio: correoDestino.trim(),
-          beneficio_titulo: beneficio.titulo
+          rut: socioInfo.rut,
+          email: correoDestino.trim(),
+          estado: 'Pendiente'
         }]);
         
         alert(`✅ ¡Beneficio reservado con éxito!\n\nRegistramos tu solicitud en la directiva. Te contactaremos a: ${correoDestino}`);
-      } catch (dbErr) {
+      } catch (dbErr: any) {
+        console.error("Error en DB fallback:", dbErr);
         alert(`✅ ¡Solicitud registrada!\n\nMuestra tu credencial con el RUT ${socioInfo.rut} en el convenio para aplicar el descuento.`);
       }
     } finally {
