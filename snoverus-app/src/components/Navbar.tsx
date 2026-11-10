@@ -5,13 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "../app/lib/supabase";
 import Campanita from "./Campanita";
+import { motion, AnimatePresence } from "framer-motion";
 
 // ─── Colores por rol ───────────────────────────────────────────────────────────
 const ROL_COLORS: Record<string, { text: string; border: string; bg: string; glow: string }> = {
   superadmin:    { text: 'text-purple-400',  border: 'border-purple-400',  bg: 'bg-purple-500/10',  glow: 'shadow-[0_0_0_1px_rgba(168,85,247,0.4)]' },
   admin:         { text: 'text-yellow-400',  border: 'border-yellow-400',  bg: 'bg-yellow-500/10',  glow: 'shadow-[0_0_0_1px_rgba(234,179,8,0.4)]'  },
   administrador: { text: 'text-yellow-400',  border: 'border-yellow-400',  bg: 'bg-yellow-500/10',  glow: 'shadow-[0_0_0_1px_rgba(234,179,8,0.4)]'  },
-  socio:         { text: 'text-green-400',   border: 'border-green-400',   bg: 'bg-green-500/10',   glow: 'shadow-[0_0_0_1px_rgba(34,197,94,0.4)]'  },
+  socio:         { text: 'text-emerald-400', border: 'border-emerald-400', bg: 'bg-emerald-500/10', glow: 'shadow-[0_0_0_1px_rgba(16,185,129,0.4)]' },
 };
 
 function getRolColor(rol: string) {
@@ -27,6 +28,20 @@ export default function Navbar() {
   const [tenantName, setTenantName] = useState("Sindicato PYC");
   const [tenantLogo, setTenantLogo] = useState("/logopyf.jpeg");
 
+  // Estado para Soft Delete / Módulos Activos
+  const [modulosActivos, setModulosActivos] = useState({
+    beneficios: true,
+    solidario: true,
+    asistencia: true,
+    finanzas: true,
+    legal: true,
+    actas: true,
+    credencial: true,
+    encuestas: true,
+    negociacion: true,
+    soporte: true
+  });
+
   const [showTenantModal, setShowTenantModal] = useState(false);
   const [editTenantName, setEditTenantName] = useState("");
   const [editTenantLogo, setEditTenantLogo] = useState("");
@@ -34,10 +49,12 @@ export default function Navbar() {
   const [savingTenant, setSavingTenant] = useState(false);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [modulosDropdown, setModulosDropdown] = useState(false);
   const [sindicatos, setSindicatos] = useState<any[]>([]);
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const getRoleNameUI = (rol: string | null | undefined) => {
     const r = String(rol || '').toLowerCase();
@@ -53,6 +70,9 @@ export default function Navbar() {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setMenuOpen(false);
       }
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setModulosDropdown(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
 
@@ -63,7 +83,7 @@ export default function Navbar() {
 
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select(`full_name, role, email, sindicatos (id, nombre, logo_url)`)
+        .select(`full_name, role, email, sindicatos (id, nombre, logo_url, config_ui)`)
         .eq('id', user.id)
         .single();
 
@@ -84,12 +104,10 @@ export default function Navbar() {
              if (found) activeSindicato = found;
           }
           
-          // Fallback si no hay nada en cache
           if (!activeSindicato && allSindicatos && allSindicatos.length > 0) {
             activeSindicato = allSindicatos[0];
           }
         } else {
-          // Si es socio o admin normal, usa su relación de perfil
           activeSindicato = profile.sindicatos ? (Array.isArray(profile.sindicatos) ? profile.sindicatos[0] : profile.sindicatos) : null;
         }
 
@@ -100,6 +118,15 @@ export default function Navbar() {
           setEditTenantName(activeSindicato.nombre || "Organización Activa");
           setEditTenantLogo(activeSindicato.logo_url || "");
 
+          if (activeSindicato.config_ui?.modulos_activos) {
+            setModulosActivos(prev => ({ ...prev, ...activeSindicato.config_ui.modulos_activos }));
+          } else {
+            const { data: sindicatoData } = await supabase.from('sindicatos').select('config_ui').eq('id', activeSindicato.id).single();
+            if (sindicatoData?.config_ui?.modulos_activos) {
+              setModulosActivos(prev => ({ ...prev, ...sindicatoData.config_ui.modulos_activos }));
+            }
+          }
+
           const channelName = `tenant-ui-${activeSindicato.id}-${Date.now()}`;
           channel = supabase.channel(channelName)
             .on('postgres_changes', {
@@ -109,6 +136,9 @@ export default function Navbar() {
               setTenantLogo(payload.new.logo_url || '/logopyf.jpeg');
               setEditTenantName(payload.new.nombre);
               setEditTenantLogo(payload.new.logo_url || '');
+              if (payload.new.config_ui?.modulos_activos) {
+                setModulosActivos(prev => ({ ...prev, ...payload.new.config_ui.modulos_activos }));
+              }
             }).subscribe();
         }
       }
@@ -178,19 +208,40 @@ export default function Navbar() {
   const isAdminOrSuper = userRole === 'superadmin' || userRole === 'admin' || userRole === 'administrador';
   const rolColor = getRolColor(userRole);
 
+  const modulosList = [
+    { key: 'credencial', href: '/dashboard/credencial', icon: '🪪', title: 'Credencial', desc: 'ID del Sindicato' },
+    { key: 'asistencia', href: '/dashboard/asistencia', icon: '📅', title: 'Asistencia', desc: 'Registro y Escáner' },
+    { key: 'actas', href: '/dashboard/actas', icon: '📜', title: 'Actas', desc: 'Documentos oficiales' },
+    { key: 'finanzas', href: '/dashboard/finanzas', icon: '💰', title: 'Finanzas', desc: 'Transparencia' },
+    { key: 'encuestas', href: '/dashboard/encuestas', icon: '📊', title: 'Votaciones', desc: 'Participación activa' },
+    { key: 'negociacion', href: '/dashboard/negociacion', icon: '🤝', title: 'Negociación', desc: 'Contratos colectivos' },
+    { key: 'solidario', href: '/dashboard/solidario', icon: '🫂', title: 'Solidario', desc: 'Aportes y ayudas' },
+    { key: 'soporte', href: '/dashboard/soporte', icon: '🎧', title: 'Soporte', desc: 'Mesa de ayuda' }
+  ];
+
   return (
     <>
-      {/* NAVBAR CON DISEÑO PREMIUM DARK (Sin grises extraños) */}
-      <nav className="fixed top-0 w-full z-[100] transition-all duration-300 bg-[#070709] border-b border-white/10 shadow-[0_4px_25px_rgba(0,0,0,0.8)]">
+      {/* NAVBAR STICKY CON GLASSMORPHISM (Elimina brechas de fondo) */}
+      <motion.nav 
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.4, ease: "easeOut" }}
+        className="sticky top-0 w-full z-[100] transition-colors duration-300 bg-[#090d16]/80 backdrop-blur-xl border-b border-white/10 shadow-[0_4px_30px_rgba(0,0,0,0.5)] m-0 p-0"
+      >
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-[76px]">
+          <div className="flex justify-between items-center h-[72px] sm:h-[76px]">
             
-            {/* 1. LADO IZQUIERDO: LOGO */}
+            {/* 1. LOGO & TENANT */}
             <div className="flex-shrink-0 flex items-center w-auto lg:w-1/4">
               {userRole === 'superadmin' ? (
                 <div className="relative" ref={menuRef}>
-                  <button onClick={() => setMenuOpen(!menuOpen)} className="group flex items-center gap-3 text-left focus:outline-none p-1.5 rounded-2xl hover:bg-white/5 transition-all">
-                    <div className="h-10 w-10 rounded-xl overflow-hidden bg-black border border-white/10 p-0.5 shadow-md transition-transform group-hover:scale-105">
+                  <motion.button 
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setMenuOpen(!menuOpen)} 
+                    className="group flex items-center gap-3 text-left focus:outline-none p-1.5 rounded-2xl hover:bg-white/5 transition-all"
+                  >
+                    <div className="h-10 w-10 rounded-xl overflow-hidden bg-black border border-white/10 p-0.5 shadow-md">
                       <img src={tenantLogo} alt={tenantName} className="h-full w-full object-cover rounded-lg" onError={(e) => { e.currentTarget.src = '/logopyf.jpeg' }} />
                     </div>
                     <div className="hidden sm:flex flex-col justify-center">
@@ -199,117 +250,155 @@ export default function Navbar() {
                         <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-300 ${menuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"></path></svg>
                       </span>
                     </div>
-                  </button>
+                  </motion.button>
 
-                  {menuOpen && (
-                    <div className="absolute left-0 mt-2 w-[300px] bg-[#121216] border border-white/10 rounded-2xl shadow-2xl p-2 z-50">
-                      <div className="space-y-1 max-h-56 overflow-y-auto custom-scrollbar p-1">
-                        {sindicatos.map(s => (
-                          <button key={s.id} onClick={() => seleccionarSindicato(s)} className={`w-full text-left px-4 py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-between ${tenantId === s.id ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30' : 'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
-                            <span className="truncate pr-2">{s.nombre}</span>
+                  <AnimatePresence>
+                    {menuOpen && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute left-0 mt-2 w-[300px] bg-[#121216]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl p-2 z-50"
+                      >
+                        <div className="space-y-1 max-h-56 overflow-y-auto custom-scrollbar p-1">
+                          {sindicatos.map(s => (
+                            <button key={s.id} onClick={() => seleccionarSindicato(s)} className={`w-full text-left px-4 py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-between ${tenantId === s.id ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30' : 'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
+                              <span className="truncate pr-2">{s.nombre}</span>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="border-t border-white/10 mt-2 pt-2 px-1">
+                          <button onClick={() => { setMenuOpen(false); setShowTenantModal(true); }} className="w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-400 hover:bg-white/5 hover:text-white rounded-xl transition-colors flex items-center gap-2">
+                            ✏️ Modificar Identidad
                           </button>
-                        ))}
-                      </div>
-                      <div className="border-t border-white/10 mt-2 pt-2 px-1">
-                        <button onClick={() => { setMenuOpen(false); setShowTenantModal(true); }} className="w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-400 hover:bg-white/5 hover:text-white rounded-xl transition-colors flex items-center gap-2">
-                          ✏️ Modificar Identidad
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               ) : isAdminOrSuper ? (
-                <button onClick={() => setShowTenantModal(true)} className="group flex items-center gap-3 p-1.5 rounded-2xl hover:bg-white/5 transition-all focus:outline-none">
-                  <div className="h-10 w-10 rounded-xl overflow-hidden border border-white/10 bg-black p-0.5 shadow-md relative transition-transform group-hover:scale-105">
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setShowTenantModal(true)} 
+                  className="group flex items-center gap-3 p-1.5 rounded-2xl hover:bg-white/5 transition-all focus:outline-none"
+                >
+                  <div className="h-10 w-10 rounded-xl overflow-hidden border border-white/10 bg-black p-0.5 shadow-md relative">
                     <img src={tenantLogo} alt={tenantName} className="h-full w-full object-cover rounded-lg" />
                   </div>
                   <span className="font-bold text-[15px] tracking-tight text-white hidden sm:block group-hover:text-yellow-400 transition-colors">{tenantName}</span>
-                </button>
+                </motion.button>
               ) : (
                 <div className="flex items-center gap-3 pl-2">
                   <div className="h-10 w-10 rounded-xl overflow-hidden border border-white/10 bg-black p-0.5 shadow-md">
                     <img src={tenantLogo} alt={tenantName} className="h-full w-full object-cover rounded-lg" />
                   </div>
-                  <Link href="/dashboard" className="font-bold text-[15px] tracking-tight text-white hidden sm:block hover:text-green-400 transition-colors">{tenantName}</Link>
+                  <Link href="/dashboard" className="font-bold text-[15px] tracking-tight text-white hidden sm:block hover:text-emerald-400 transition-colors">{tenantName}</Link>
                 </div>
               )}
             </div>
 
-            {/* 2. CENTRO: NAVEGACIÓN FLOTANTE LIMPIA */}
-            <div className="hidden lg:flex flex-1 items-center justify-center gap-1">
-              <Link href="/dashboard" className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 transition-all">Inicio</Link>
-              <Link href="/dashboard/beneficios" className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 transition-all">Beneficios</Link>
-              <Link href="/dashboard/chat-legal" className="px-5 py-2.5 rounded-xl text-sm font-medium text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 transition-all flex items-center gap-2">
+            {/* 2. LINKS DE NAVEGACIÓN CENTRAL */}
+            <div className="hidden lg:flex flex-1 items-center justify-center gap-2">
+              <Link href="/dashboard" className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-300 hover:text-white hover:bg-white/5 transition-all">
+                Inicio
+              </Link>
+              
+              {modulosActivos.beneficios && (
+                <Link href="/dashboard/beneficios" className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-300 hover:text-white hover:bg-white/5 transition-all">
+                  Beneficios
+                </Link>
+              )}
+
+              <Link href="/dashboard/chat-legal" className="px-4 py-2 rounded-xl text-sm font-semibold text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 transition-all flex items-center gap-2 border border-transparent hover:border-blue-500/20">
                 🤖 Legal AI
               </Link>
 
-              {/* MEGAMENÚ */}
-              <div className="relative group flex items-center h-[76px]">
-                <button className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-medium text-slate-300 group-hover:text-white group-hover:bg-white/5 transition-all outline-none">
+              {/* MEGAMENÚ MODULOS ANIMADO */}
+              <div 
+                className="relative" 
+                ref={dropdownRef}
+                onMouseEnter={() => setModulosDropdown(true)}
+                onMouseLeave={() => setModulosDropdown(false)}
+              >
+                <button 
+                  onClick={() => setModulosDropdown(!modulosDropdown)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-slate-300 hover:text-white hover:bg-white/5 transition-all outline-none"
+                >
                   Módulos 
-                  <svg className="w-3.5 h-3.5 opacity-70 group-hover:rotate-180 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" /></svg>
+                  <motion.svg 
+                    animate={{ rotate: modulosDropdown ? 180 : 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="w-3.5 h-3.5 opacity-70" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                  </motion.svg>
                 </button>
 
-                <div className="absolute top-[76px] left-1/2 -translate-x-1/2 w-[480px] bg-[#121216] border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9)] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 transform translate-y-2 group-hover:translate-y-0 z-50 overflow-hidden">
-                  <div className="p-3 grid grid-cols-2 gap-1.5">
-                    <Link href="/dashboard/credencial" className="flex items-center gap-3.5 p-3 rounded-xl hover:bg-white/5 transition-all group/item border border-transparent hover:border-white/5">
-                      <span className="text-xl group-hover/item:scale-110 transition-transform">🪪</span>
-                      <div><h4 className="text-sm font-semibold text-white mb-0.5">Credencial</h4><p className="text-[10px] text-slate-400 font-medium leading-tight">ID del Sindicato</p></div>
-                    </Link>
-                    <Link href="/dashboard/asistencia" className="flex items-center gap-3.5 p-3 rounded-xl hover:bg-white/5 transition-all group/item border border-transparent hover:border-white/5">
-                      <span className="text-xl group-hover/item:scale-110 transition-transform">📅</span>
-                      <div><h4 className="text-sm font-semibold text-white mb-0.5">Asistencia</h4><p className="text-[10px] text-slate-400 font-medium leading-tight">Registro y Escáner</p></div>
-                    </Link>
-                    <Link href="/dashboard/actas" className="flex items-center gap-3.5 p-3 rounded-xl hover:bg-white/5 transition-all group/item border border-transparent hover:border-white/5">
-                      <span className="text-xl group-hover/item:scale-110 transition-transform">📜</span>
-                      <div><h4 className="text-sm font-semibold text-white mb-0.5">Actas</h4><p className="text-[10px] text-slate-400 font-medium leading-tight">Documentos oficiales</p></div>
-                    </Link>
-                    <Link href="/dashboard/finanzas" className="flex items-center gap-3.5 p-3 rounded-xl hover:bg-white/5 transition-all group/item border border-transparent hover:border-white/5">
-                      <span className="text-xl group-hover/item:scale-110 transition-transform">💰</span>
-                      <div><h4 className="text-sm font-semibold text-white mb-0.5">Finanzas</h4><p className="text-[10px] text-slate-400 font-medium leading-tight">Transparencia</p></div>
-                    </Link>
-                    <Link href="/dashboard/encuestas" className="flex items-center gap-3.5 p-3 rounded-xl hover:bg-white/5 transition-all group/item border border-transparent hover:border-white/5">
-                      <span className="text-xl group-hover/item:scale-110 transition-transform">📊</span>
-                      <div><h4 className="text-sm font-semibold text-white mb-0.5">Votaciones</h4><p className="text-[10px] text-slate-400 font-medium leading-tight">Participación activa</p></div>
-                    </Link>
-                    <Link href="/dashboard/negociacion" className="flex items-center gap-3.5 p-3 rounded-xl hover:bg-white/5 transition-all group/item border border-transparent hover:border-white/5">
-                      <span className="text-xl group-hover/item:scale-110 transition-transform">🤝</span>
-                      <div><h4 className="text-sm font-semibold text-white mb-0.5">Negociación</h4><p className="text-[10px] text-slate-400 font-medium leading-tight">Contratos colectivos</p></div>
-                    </Link>
-                    <Link href="/dashboard/solidario" className="flex items-center gap-3.5 p-3 rounded-xl hover:bg-white/5 transition-all group/item border border-transparent hover:border-white/5">
-                      <span className="text-xl group-hover/item:scale-110 transition-transform">🫂</span>
-                      <div><h4 className="text-sm font-semibold text-white mb-0.5">Solidario</h4><p className="text-[10px] text-slate-400 font-medium leading-tight">Aportes y ayudas</p></div>
-                    </Link>
-                    <Link href="/dashboard/soporte" className="flex items-center gap-3.5 p-3 rounded-xl hover:bg-white/5 transition-all group/item border border-transparent hover:border-white/5">
-                      <span className="text-xl group-hover/item:scale-110 transition-transform">🎧</span>
-                      <div><h4 className="text-sm font-semibold text-white mb-0.5">Soporte</h4><p className="text-[10px] text-slate-400 font-medium leading-tight">Mesa de ayuda</p></div>
-                    </Link>
-                  </div>
-                </div>
+                <AnimatePresence>
+                  {modulosDropdown && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                      transition={{ duration: 0.18, ease: "easeOut" }}
+                      className="absolute top-full left-1/2 -translate-x-1/2 w-[480px] bg-[#0c101c]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 overflow-hidden mt-1"
+                    >
+                      <div className="p-3 grid grid-cols-2 gap-1.5">
+                        {modulosList.filter(m => (modulosActivos as any)[m.key]).map((item) => (
+                          <Link 
+                            key={item.key}
+                            href={item.href} 
+                            onClick={() => setModulosDropdown(false)}
+                            className="flex items-center gap-3.5 p-3 rounded-xl hover:bg-white/5 transition-all group/item border border-transparent hover:border-white/5"
+                          >
+                            <span className="text-xl group-hover/item:scale-110 transition-transform">{item.icon}</span>
+                            <div>
+                              <h4 className="text-sm font-semibold text-white mb-0.5">{item.title}</h4>
+                              <p className="text-[10px] text-slate-400 font-medium leading-tight">{item.desc}</p>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
 
-            {/* LADO DERECHO */}
-            <div className="flex items-center justify-end gap-5 w-auto lg:w-1/4">
+            {/* 3. LADO DERECHO: PERFIL / ACCIONES */}
+            <div className="flex items-center justify-end gap-3 sm:gap-5 w-auto lg:w-1/4">
               
               <div className="hidden xl:flex items-center">
                 {userRole === 'superadmin' && (
-                  <Link href="/superadmin" className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 hover:text-white transition-colors mr-6">SaaS</Link>
+                  <Link href="/superadmin" className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 hover:text-white transition-colors mr-6">
+                    SaaS
+                  </Link>
                 )}
                 {isAdminOrSuper && (
-                  <Link href="/dashboard/admin" className="text-xs font-semibold text-slate-200 hover:text-white flex items-center gap-2 bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl transition-all border border-white/10 shadow-sm">
-                    ⚙️ Panel Admin
-                  </Link>
+                  <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
+                    <Link href="/dashboard/admin" className="text-xs font-semibold text-slate-200 hover:text-white flex items-center gap-2 bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl transition-all border border-white/10 shadow-sm">
+                      ⚙️ Panel Admin
+                    </Link>
+                  </motion.div>
                 )}
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3 sm:gap-4">
                 <Campanita />
                 
-                <div className="hidden sm:flex items-center gap-3 cursor-pointer group" onClick={() => router.push('/dashboard/perfil')}>
+                <motion.div 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="hidden sm:flex items-center gap-3 cursor-pointer group" 
+                  onClick={() => router.push('/dashboard/perfil')}
+                >
                   <div className="flex flex-col items-end">
-                    <span className="text-sm font-semibold text-white group-hover:text-white/80 transition-colors leading-tight">{userName}</span>
-                    {/* Badge de rol con color */}
+                    <span className="text-sm font-semibold text-white group-hover:text-blue-300 transition-colors leading-tight">{userName}</span>
                     <span className={`text-[9px] font-bold tracking-widest uppercase ${rolColor.text}`}>
                       {getRoleNameUI(userRole)}
                     </span>
@@ -318,85 +407,129 @@ export default function Navbar() {
                   <div className="h-9 w-9 rounded-xl bg-black border border-white/15 flex items-center justify-center text-xs font-bold text-white shadow-md group-hover:border-blue-400 transition-all">
                     {iniciales}
                   </div>
-                </div>
+                </motion.div>
 
-                <button onClick={handleLogout} className="hidden sm:block text-slate-400 hover:text-red-400 transition-colors p-1" title="Cerrar Sesión">
+                <button 
+                  onClick={handleLogout} 
+                  className="hidden sm:block text-slate-400 hover:text-rose-400 transition-colors p-1.5 rounded-lg hover:bg-rose-500/10" 
+                  title="Cerrar Sesión"
+                >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                 </button>
 
-                {/* HAMBURGUESA MÓVIL */}
-                <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="lg:hidden text-slate-300 hover:text-white transition-colors p-2 rounded-xl bg-white/5 active:scale-95">
+                {/* BOTÓN HAMBURGUESA MÓVIL ANIMADO */}
+                <motion.button 
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+                  className="lg:hidden text-slate-300 hover:text-white transition-colors p-2 rounded-xl bg-white/5 border border-white/10"
+                >
                   {isMobileMenuOpen 
                     ? <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg> 
                     : <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" /></svg>
                   }
-                </button>
+                </motion.button>
               </div>
             </div>
 
           </div>
         </div>
-      </nav>
+      </motion.nav>
 
-      {/* Espaciado transparente para compensar la barra fija */}
-      <div className="h-[76px] hidden lg:block bg-transparent pointer-events-none"></div>
-
-      {/* --- MENÚ MÓVIL --- */}
-      {isMobileMenuOpen && (
-        <div className="lg:hidden fixed inset-0 top-[76px] z-[90] bg-[#070709] flex flex-col overflow-y-auto animate-in fade-in duration-200">
-          <div className="flex flex-col px-6 py-8 space-y-3 pb-32">
-            <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard" className="text-base font-semibold text-white p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all">🏠 Inicio</Link>
-            <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/credencial" className="text-base font-semibold text-white p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all">🪪 Mi Credencial Digital</Link>
-            <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/asistencia" className="text-base font-semibold text-white p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all">📅 Escáner de Asistencia</Link>
-            <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/beneficios" className="text-base font-semibold text-white p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all">🎁 Beneficios</Link>
-            <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/chat-legal" className="text-base font-semibold text-blue-300 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">🤖 Asistente Legal AI</Link>
-            
-            <div className="my-4 border-t border-white/10"></div>
-            
-            {isAdminOrSuper && (
-              <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/admin" className="text-sm font-semibold text-white p-4 rounded-xl bg-white/10 border border-white/10 flex justify-center mb-2 hover:bg-white/15 transition-all">
-                ⚙️ Panel Administrativo
+      {/* --- MENÚ MÓVIL FULLSCREEN CON ANIMACIÓN SUAVE --- */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="lg:hidden fixed inset-0 top-[72px] z-[90] bg-[#090d16]/95 backdrop-blur-2xl flex flex-col overflow-y-auto"
+          >
+            <div className="flex flex-col px-6 py-6 space-y-3 pb-32">
+              <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard" className="text-sm font-semibold text-white p-3.5 rounded-xl bg-white/5 border border-white/5 active:bg-white/10 transition-all flex items-center gap-3">
+                <span>🏠</span> Inicio
               </Link>
-            )}
-            
-            <button onClick={handleLogout} className="text-sm font-semibold text-red-400 p-4 rounded-xl bg-red-500/10 border border-red-500/20 transition-colors flex justify-center">
-              🚪 Cerrar Sesión
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Edición Sindicato */}
-      {showTenantModal && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setShowTenantModal(false)}>
-          <div className="bg-[#121216] rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden border border-white/10 animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-white/10 flex justify-between items-center">
-              <h3 className="text-base font-bold text-white">Identidad Visual</h3>
-              <button onClick={() => {setShowTenantModal(false); setLogoFile(null);}} className="text-slate-400 hover:text-white transition-colors bg-white/5 h-8 w-8 rounded-xl flex items-center justify-center">✕</button>
+              
+              {modulosActivos.credencial && (
+                <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/credencial" className="text-sm font-semibold text-white p-3.5 rounded-xl bg-white/5 border border-white/5 active:bg-white/10 transition-all flex items-center gap-3">
+                  <span>🪪</span> Mi Credencial Digital
+                </Link>
+              )}
+              {modulosActivos.asistencia && (
+                <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/asistencia" className="text-sm font-semibold text-white p-3.5 rounded-xl bg-white/5 border border-white/5 active:bg-white/10 transition-all flex items-center gap-3">
+                  <span>📅</span> Escáner de Asistencia
+                </Link>
+              )}
+              {modulosActivos.beneficios && (
+                <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/beneficios" className="text-sm font-semibold text-white p-3.5 rounded-xl bg-white/5 border border-white/5 active:bg-white/10 transition-all flex items-center gap-3">
+                  <span>🎁</span> Beneficios
+                </Link>
+              )}
+              <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/chat-legal" className="text-sm font-semibold text-blue-300 p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center gap-3">
+                <span>🤖</span> Asistente Legal AI
+              </Link>
+              
+              <div className="my-2 border-t border-white/10"></div>
+              
+              {isAdminOrSuper && (
+                <Link onClick={() => setIsMobileMenuOpen(false)} href="/dashboard/admin" className="text-xs font-semibold text-white p-3.5 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center gap-2">
+                  ⚙️ Panel Administrativo
+                </Link>
+              )}
+              
+              <button onClick={handleLogout} className="text-xs font-semibold text-rose-400 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 transition-colors flex items-center justify-center gap-2">
+                🚪 Cerrar Sesión
+              </button>
             </div>
-            <form onSubmit={handleSaveTenant} className="p-6 space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-widest">Nombre Oficial</label>
-                <input type="text" value={editTenantName} onChange={(e) => setEditTenantName(e.target.value)} required className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-white focus:outline-none focus:border-blue-500 transition-colors" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL EDICIÓN SINDICATO */}
+      <AnimatePresence>
+        {showTenantModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-md p-4" 
+            onClick={() => setShowTenantModal(false)}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#101424] rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden border border-white/10" 
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6 border-b border-white/10 flex justify-between items-center">
+                <h3 className="text-base font-bold text-white">Identidad Visual</h3>
+                <button onClick={() => {setShowTenantModal(false); setLogoFile(null);}} className="text-slate-400 hover:text-white transition-colors bg-white/5 h-8 w-8 rounded-xl flex items-center justify-center">✕</button>
               </div>
-              <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-widest">Logo / Emblema</label>
-                <input type="file" accept="image/*" onChange={(e) => { setLogoFile(e.target.files ? e.target.files[0] : null); if (e.target.files && e.target.files.length > 0) setEditTenantLogo(""); }} className="w-full text-xs font-medium text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-blue-600/20 file:text-blue-400 hover:file:bg-blue-600/30 cursor-pointer transition-colors" />
-                <div className="flex items-center gap-3 my-3">
-                  <div className="h-px bg-white/10 flex-1"></div>
-                  <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">O Enlace Web</span>
-                  <div className="h-px bg-white/10 flex-1"></div>
+              <form onSubmit={handleSaveTenant} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-widest">Nombre Oficial</label>
+                  <input type="text" value={editTenantName} onChange={(e) => setEditTenantName(e.target.value)} required className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-white focus:outline-none focus:border-blue-500 transition-colors" />
                 </div>
-                <input type="url" value={editTenantLogo} onChange={(e) => { setEditTenantLogo(e.target.value); setLogoFile(null); }} placeholder="https://..." className="w-full bg-black border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors" />
-              </div>
-              <div className="pt-2 flex gap-3">
-                <button type="button" onClick={() => {setShowTenantModal(false); setLogoFile(null);}} className="flex-1 bg-white/5 text-slate-300 py-3 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/10 transition-colors">Cancelar</button>
-                <button type="submit" disabled={savingTenant} className="flex-1 bg-blue-600 text-white py-3 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-blue-500 transition-colors shadow-md">{savingTenant ? 'Guardando...' : 'Aplicar'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+                <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                  <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-widest">Logo / Emblema</label>
+                  <input type="file" accept="image/*" onChange={(e) => { setLogoFile(e.target.files ? e.target.files[0] : null); if (e.target.files && e.target.files.length > 0) setEditTenantLogo(""); }} className="w-full text-xs font-medium text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-blue-600/20 file:text-blue-400 hover:file:bg-blue-600/30 cursor-pointer transition-colors" />
+                  <div className="flex items-center gap-3 my-3">
+                    <div className="h-px bg-white/10 flex-1"></div>
+                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">O Enlace Web</span>
+                    <div className="h-px bg-white/10 flex-1"></div>
+                  </div>
+                  <input type="url" value={editTenantLogo} onChange={(e) => { setEditTenantLogo(e.target.value); setLogoFile(null); }} placeholder="https://..." className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors" />
+                </div>
+                <div className="pt-2 flex gap-3">
+                  <button type="button" onClick={() => {setShowTenantModal(false); setLogoFile(null);}} className="flex-1 bg-white/5 text-slate-300 py-3 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/10 transition-colors">Cancelar</button>
+                  <button type="submit" disabled={savingTenant} className="flex-1 bg-blue-600 text-white py-3 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-blue-500 transition-colors shadow-md">{savingTenant ? 'Guardando...' : 'Aplicar'}</button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
