@@ -1,52 +1,93 @@
-import { NextResponse } from 'next/server';
-import sgMail from '@sendgrid/mail';
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-// Inicializa SendGrid con tu clave secreta del archivo .env.local
-sgMail.setApiKey(process.env.SENDGRID_API_KEY as string);
-
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    // 1. Recibimos las variables EXACTAS que envía el panel de admin
-    const { email, nombre, rut, password, sindicato } = await request.json();
+    const { mensaje, sindicatoId } = await req.json();
 
-    if (!email) {
-      return NextResponse.json({ error: 'Falta el correo de destino' }, { status: 400 });
+    if (!mensaje || !mensaje.trim()) {
+      return NextResponse.json({ error: 'El mensaje no puede estar vacío.' }, { status: 400 });
     }
 
-    // 2. Preparamos el paquete de datos para SendGrid con diseño HTML
-    const msg = {
-      to: email, 
-      from: 'pycsindicato@gmail.com', // IMPORTANTE: Este correo DEBE estar verificado en tu cuenta de SendGrid
-      subject: `¡Bienvenido al ${sindicato}! - Credenciales de acceso`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1e293b; border: 1px solid #e2e8f0; border-radius: 12px;">
-          <h2 style="color: #2563eb;">¡Hola ${nombre}! 🎉</h2>
-          <p>Tu postulación ha sido aprobada con éxito. Bienvenido/a de manera oficial al <strong>${sindicato}</strong>.</p>
-          <p>Aquí tienes tus credenciales seguras para acceder al Portal de Socios:</p>
-          
-          <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; border: 1px dashed #cbd5e1; margin: 20px 0;">
-            <p style="margin: 0 0 10px 0;"><strong>RUT:</strong> ${rut}</p>
-            <p style="margin: 0;"><strong>Contraseña Temporal:</strong> <span style="background: #e2e8f0; padding: 4px 8px; border-radius: 4px; font-family: monospace;">${password}</span></p>
-          </div>
-          
-          <p style="font-size: 14px; color: #64748b;">⚠️ <em>Te recomendamos iniciar sesión y cambiar esta contraseña lo antes posible.</em></p>
-          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;" />
-          <p style="font-size: 12px; color: #94a3b8; text-align: center;">Este es un mensaje automático de la plataforma Sindicato PYC. Por favor no respondas a este correo.</p>
-        </div>
-      `,
-    };
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'No está configurada la variable GEMINI_API_KEY en el servidor.' },
+        { status: 500 }
+      );
+    }
 
-    // 3. Disparamos el envío
-    await sgMail.send(msg);
+    // 1. Conexión a Supabase para obtener contexto del sindicato
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
-    return NextResponse.json({ success: true, message: 'Correo enviado por SendGrid' }, { status: 200 });
+    let contextoSindicato = 'Convenios generales y Código del Trabajo de Chile.';
+    if (sindicatoId) {
+      const { data: sindicato } = await supabase
+        .from('sindicatos')
+        .select('nombre, configuracion')
+        .eq('id', sindicatoId)
+        .maybeSingle();
+
+      if (sindicato?.nombre) {
+        contextoSindicato = `Organización: ${sindicato.nombre}.`;
+      }
+    }
+
+    // 2. Prompt de Sistema especializado en Derecho Laboral Chileno
+    const promptSistema = `
+      Eres el Asistente Legal Inteligente del Sindicato, integrado en la plataforma Sindicato-PyC.
+      Tu misión es orientar a los trabajadores y socios sobre sus dudas laborales en Chile.
+      
+      Marco normativo aplicable:
+      - Código del Trabajo de Chile (licencias médicas, fueros sindicales y maternales, tipos de contrato, causales de despido arts. 159, 160 y 161).
+      - Dictámenes de la Dirección del Trabajo (DT).
+      - Negociación colectiva y contratos colectivos vigentes.
+      Contexto de la organización sindical: ${contextoSindicato}
+
+      Instrucciones de formato y tono:
+      - Responde con precisión jurídica pero en lenguaje claro, cercano y comprensible para el trabajador.
+      - Si una consulta requiere patrocinio presencial, aconseja acudir a su dirigente sindical o a la Inspección del Trabajo.
+      - Sé conciso y directo en los puntos clave.
+    `;
+
+    // 3. Llamada directa a la API de Gemini (modelo flash rápido sin servidores intermedios)
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+    const resIA = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: `${promptSistema}\n\nPregunta del socio: ${mensaje}` }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!resIA.ok) {
+      const errData = await resIA.json();
+      console.error('Error Gemini API:', errData);
+      throw new Error('Error al consultar con el modelo de lenguaje.');
+    }
+
+    const dataIA = await resIA.json();
+    const textoRespuesta =
+      dataIA.candidates?.[0]?.content?.parts?.[0]?.text ||
+      'No se pudo generar una respuesta jurídica en este momento.';
+
+    return NextResponse.json({ respuesta: textoRespuesta });
+
   } catch (error: any) {
-    console.error("Fallo el envío por SendGrid:", error);
-    
-    if (error.response) {
-      console.error(error.response.body);
-    }
-    
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('Error en /api/chat-legal:', error);
+    return NextResponse.json(
+      { error: error.message || 'Error interno del servidor.' },
+      { status: 500 }
+    );
   }
 }

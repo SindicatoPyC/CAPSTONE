@@ -13,10 +13,11 @@ export default function DashboardLayout({
   const isAdminArea = pathname?.startsWith('/dashboard/admin');
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#f4f7fb] text-slate-900">
+    <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100">
       {!isAdminArea && <Navbar />}
       
-      <main className="flex-grow">
+      {/* Eliminamos márgenes o paddings parásitos para que el hero pegue al ras del navbar */}
+      <main className="flex-grow w-full m-0 p-0">
         {children}
       </main>
     </div>

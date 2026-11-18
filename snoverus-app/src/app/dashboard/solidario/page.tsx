@@ -8,6 +8,7 @@ export default function SolidarioPage() {
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [sindicatoIdActual, setSindicatoIdActual] = useState<number | null>(null);
 
   // Estados de Datos
   const [meta, setMeta] = useState(1000000);
@@ -48,25 +49,48 @@ export default function SolidarioPage() {
       
       if (profile) {
         setPerfilCache(profile);
+        let targetSindicatoId = profile.sindicato_id;
+
+        // Si es Superadmin, respeta el sindicato activo seleccionado en el Navbar (localStorage)
         const rolUsuario = String(profile.role || '').toLowerCase();
-        const esAdministrador = rolUsuario === 'admin' || rolUsuario === 'administrador' || rolUsuario === 'directiva';
+        const esAdministrador = rolUsuario === 'admin' || rolUsuario === 'administrador' || rolUsuario === 'directiva' || rolUsuario === 'superadmin';
         setIsAdmin(esAdministrador);
 
-        // Traer Meta
-        const { data: metaData } = await supabase.from('fondo_meta').select('monto_meta').eq('id', 1).single();
-        if (metaData) setMeta(metaData.monto_meta);
+        if (rolUsuario === 'superadmin') {
+          const cachedTenant = localStorage.getItem('sindicato_activo');
+          if (cachedTenant) {
+            targetSindicatoId = Number(cachedTenant);
+          }
+        }
 
-        // Traer Aportes
-        let queryAportes = supabase.from('fondo_aportes').select('*').order('created_at', { ascending: false });
-        if (!esAdministrador) queryAportes = queryAportes.eq('user_id', currentUser.id);
-        const { data: aportesData } = await queryAportes;
-        if (aportesData) setAportes(aportesData);
+        if (targetSindicatoId) {
+          setSindicatoIdActual(targetSindicatoId);
 
-        // Traer Solicitudes (usando tu tabla existente: fondo_solidario)
-        let querySol = supabase.from('fondo_solidario').select('*').order('created_at', { ascending: false });
-        if (!esAdministrador) querySol = querySol.eq('usuario_rut', profile.rut);
-        const { data: solData } = await querySol;
-        if (solData) setSolicitudes(solData);
+          // Traer Meta Multi-Tenant desde la configuración del sindicato (o fallback a tabla)
+          const { data: sindicatoData } = await supabase.from('sindicatos').select('config_ui').eq('id', targetSindicatoId).single();
+          if (sindicatoData?.config_ui?.fondo_meta) {
+            setMeta(Number(sindicatoData.config_ui.fondo_meta));
+          } else {
+            const { data: metaData } = await supabase.from('fondo_meta').select('monto_meta').eq('id', 1).maybeSingle();
+            if (metaData) setMeta(metaData.monto_meta);
+          }
+
+          // Traer Aportes filtrados por sindicato_id (con control limpio para socios/admins)
+          let queryAportes = supabase.from('fondo_aportes').select('*').eq('sindicato_id', targetSindicatoId).order('created_at', { ascending: false });
+          if (!esAdministrador) {
+            queryAportes = queryAportes.eq('user_id', currentUser.id);
+          }
+          const { data: aportesData } = await queryAportes;
+          setAportes(aportesData || []);
+
+          // Traer Solicitudes (fondo_solidario) filtradas por sindicato_id
+          let querySol = supabase.from('fondo_solidario').select('*').eq('sindicato_id', targetSindicatoId).order('created_at', { ascending: false });
+          if (!esAdministrador) {
+            querySol = querySol.eq('usuario_rut', profile.rut);
+          }
+          const { data: solData } = await querySol;
+          setSolicitudes(solData || []);
+        }
       }
     }
     setLoading(false);
@@ -76,6 +100,8 @@ export default function SolidarioPage() {
   const handleEnviarAporte = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!archivoAporte) return alert("Sube el comprobante de transferencia.");
+    if (!sindicatoIdActual) return alert("Error: No se detectó el sindicato activo.");
+    
     setEnviandoAporte(true);
     try {
       const supabase = createClient();
@@ -87,7 +113,13 @@ export default function SolidarioPage() {
       const { data: publicUrlData } = supabase.storage.from('comprobantes').getPublicUrl(fileName);
       
       await supabase.from('fondo_aportes').insert([{
-        user_id: user.id, rut: perfilCache.rut, nombre: perfilCache.full_name, monto: parseInt(montoAporte), comprobante_url: publicUrlData.publicUrl, estado: 'Pendiente'
+        sindicato_id: sindicatoIdActual,
+        user_id: user.id, 
+        rut: perfilCache.rut, 
+        nombre: perfilCache.full_name, 
+        monto: parseInt(montoAporte), 
+        comprobante_url: publicUrlData.publicUrl, 
+        estado: 'Pendiente'
       }]);
 
       alert("✅ Aporte enviado para revisión. ¡Gracias por tu solidaridad!");
@@ -99,11 +131,18 @@ export default function SolidarioPage() {
 
   const handleEnviarSolicitud = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!sindicatoIdActual) return alert("Error: No se detectó el sindicato activo.");
+    
     setEnviandoSolicitud(true);
     try {
       const supabase = createClient();
       await supabase.from('fondo_solidario').insert([{
-        usuario_rut: perfilCache.rut, tipo_beneficio: tipoBeneficio, monto_solicitado: parseInt(montoSolicitado), descripcion: descripcion, estado: 'En Revisión'
+        sindicato_id: sindicatoIdActual,
+        usuario_rut: perfilCache.rut, 
+        tipo_beneficio: tipoBeneficio, 
+        monto_solicitado: parseInt(montoSolicitado), 
+        descripcion: descripcion, 
+        estado: 'En Revisión'
       }]);
       alert("✅ Solicitud de auxilio enviada al directorio.");
       setShowSolicitarModal(false);
@@ -115,13 +154,21 @@ export default function SolidarioPage() {
   // --- ACCIONES ADMIN ---
   const handleGuardarMeta = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!sindicatoIdActual) return;
     setGuardandoMeta(true);
     try {
       const supabase = createClient();
-      await supabase.from('fondo_meta').update({ monto_meta: parseInt(nuevaMeta) }).eq('id', 1);
+      
+      const { data: sindicatoActual } = await supabase.from('sindicatos').select('config_ui').eq('id', sindicatoIdActual).single();
+      const configActual = sindicatoActual?.config_ui || {};
+      configActual.fondo_meta = parseInt(nuevaMeta);
+
+      await supabase.from('sindicatos').update({ config_ui: configActual }).eq('id', sindicatoIdActual);
+      
       setMeta(parseInt(nuevaMeta));
       setShowMetaModal(false);
       setNuevaMeta('');
+      alert("✅ Meta actualizada con éxito para tu organización.");
     } catch (err) { alert("Error al guardar la meta."); } finally { setGuardandoMeta(false); }
   };
 
@@ -323,7 +370,7 @@ export default function SolidarioPage() {
       </main>
 
       <AnimatePresence>
-        {/* MODALES ADAPTADOS CON ESTILOS MODERNOS (idénticos al módulo financiero) */}
+        {/* MODALES ADAPTADOS CON ESTILOS MODERNOS */}
         
         {/* MODAL ADMIN: CONFIGURAR META */}
         {showMetaModal && (

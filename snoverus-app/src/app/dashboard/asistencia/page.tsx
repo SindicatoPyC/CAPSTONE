@@ -34,25 +34,23 @@ export default function AsistenciaPage() {
         const rol = String(profile.role || '').toLowerCase();
         setIsAdmin(rol === 'admin' || rol === 'administrador' || rol === 'superadmin');
         setSindicatoId(profile.sindicato_id);
-        
         setOperadorNombre(profile.full_name || 'Directiva');
 
-        // 🚨 OBTENER LA ÚLTIMA ASAMBLEA CREADA PARA ESTE SINDICATO 🚨
+        // 🚨 CONSULTA BLINDADA SIN .single() PARA EVITAR ERROR 406 🚨
         if (profile.sindicato_id) {
-          const { data: asambleaData, error } = await supabase
+          const { data: asambleas, error } = await supabase
             .from('historial_asambleas')
             .select('titulo')
             .eq('sindicato_id', profile.sindicato_id)
-            .order('created_at', { ascending: false }) // Obtener la más reciente
-            .limit(1)
-            .single();
+            .order('created_at', { ascending: false })
+            .limit(1);
             
           if (error) {
              console.error("Error al buscar última asamblea:", error);
              setTituloAsamblea('Asamblea General Ordinaria (Default)');
-          } else if (asambleaData && asambleaData.titulo) {
-            setTituloAsamblea(asambleaData.titulo);
-            console.log("Asamblea activa encontrada:", asambleaData.titulo);
+          } else if (asambleas && asambleas.length > 0 && asambleas[0].titulo) {
+            setTituloAsamblea(asambleas[0].titulo);
+            console.log("Asamblea activa encontrada:", asambleas[0].titulo);
           } else {
             setTituloAsamblea('Asamblea General Ordinaria (Default)');
           }
@@ -82,24 +80,26 @@ export default function AsistenciaPage() {
 
       const supabase = createClient();
 
-      // 🚨 AGREGAMOS EMAIL AL SELECT 🚨
-      const { data: perfilSocio } = await supabase
+      // Consulta de perfil blindada sin .single()
+      const { data: perfiles } = await supabase
         .from('profiles')
         .select('full_name, role, email')
         .eq('rut', qrData.rut)
-        .single();
+        .limit(1);
+
+      const perfilSocio = perfiles && perfiles.length > 0 ? perfiles[0] : null;
 
       const nombreSocio = perfilSocio?.full_name || 'Socio Registrado';
       const emailSocio = perfilSocio?.email || 'Sin correo';
       const rolSocio = String(perfilSocio?.role === 'admin' || perfilSocio?.role === 'administrador' ? 'Directiva' : 'Socio').toUpperCase();
 
-      // Buscamos si ya existe asistencia PARA ESTA ASAMBLEA EXACTA
+      // Buscamos si ya existe asistencia PARA ESTA ASAMBLEA EXACTA (Usando .maybeSingle() que es seguro)
       const { data: registroPrevio, error: fetchError } = await supabase
         .from('asistencia_asambleas')
         .select('*')
         .eq('sindicato_id', sindicatoId)
         .eq('usuario_rut', qrData.rut)
-        .eq('asamblea_titulo', tituloAsamblea.trim()) // IMPORTANTE: .trim() para evitar errores por espacios
+        .eq('asamblea_titulo', tituloAsamblea.trim())
         .maybeSingle();
 
       if (fetchError) throw new Error(`Error buscando registro: ${fetchError.message}`);
@@ -116,17 +116,17 @@ export default function AsistenciaPage() {
           setMensajeStatus({ texto: `👋 Salida Registrada`, subtexto: nombreSocio, tipo: 'exit' });
         }
       } else {
-        // 🚨 Marcar ENTRADA con los nuevos campos de auditoría
+        // Marcar ENTRADA con campos de auditoría
         const { error: insertError } = await supabase
           .from('asistencia_asambleas')
           .insert([{
             sindicato_id: sindicatoId,
             usuario_rut: qrData.rut,
             usuario_nombre: nombreSocio,
-            usuario_email: emailSocio, // Guardamos el correo directamente
+            usuario_email: emailSocio,
             usuario_rol: rolSocio,
             operador_nombre: operadorNombre, 
-            asamblea_titulo: tituloAsamblea.trim(), // Evita desajustes con el panel admin
+            asamblea_titulo: tituloAsamblea.trim(),
             hora_entrada: new Date().toISOString()
           }]);
 

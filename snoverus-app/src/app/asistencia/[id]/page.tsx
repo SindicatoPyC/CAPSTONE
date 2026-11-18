@@ -26,12 +26,16 @@ export default function RegistrarAsistenciaPage({ params }: { params: { id: stri
         return;
       }
 
-      const { data: profile } = await supabase.from('profiles').select('sindicato_id, rut').eq('id', user.id).single();
-      const { data: asamblea } = await supabase.from('asambleas_votaciones').select('sindicato_id, estado, titulo').eq('id', params.id).single();
+      // Consulta blindada sin .single() para evitar errores 406
+      const { data: profiles } = await supabase.from('profiles').select('sindicato_id, rut').eq('id', user.id).limit(1);
+      const profile = profiles && profiles.length > 0 ? profiles[0] : null;
 
-      if (!asamblea || asamblea.sindicato_id !== profile?.sindicato_id) {
+      const { data: asambleas } = await supabase.from('asambleas_votaciones').select('sindicato_id, estado, titulo').eq('id', params.id).limit(1);
+      const asamblea = asambleas && asambleas.length > 0 ? asambleas[0] : null;
+
+      if (!asamblea || !profile || asamblea.sindicato_id !== profile.sindicato_id) {
         setEstado('error');
-        setMensaje('Esta asamblea no pertenece a tu organización.');
+        setMensaje('Esta asamblea no pertenece a tu organización o no fue encontrada.');
         return;
       }
 
@@ -43,14 +47,14 @@ export default function RegistrarAsistenciaPage({ params }: { params: { id: stri
 
       const horaActual = new Date().toISOString();
 
-      // Registro oficial en Supabase con el sindicato_id incluido para el Historial Pro en tiempo real
+      // Registro oficial en Supabase con el sindicato_id incluido
       const { error: insertError } = await supabase.from('asistencia_asambleas').insert([{
         asamblea_titulo: asamblea.titulo,
         usuario_rut: profile.rut,
         user_id: user.id,
         estado: 'Presente',
         fecha_asistencia: horaActual,
-        sindicato_id: asamblea.sindicato_id // <- ¡Clave para que aparezca en el Historial Pro del Admin!
+        sindicato_id: asamblea.sindicato_id
       }]);
 
       setTimestamp(new Date(horaActual).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
