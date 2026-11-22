@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
+import { notificar } from '../../lib/notificar';
 
 export default function EncuestasPage() {
   const [user, setUser] = useState<any>(null);
@@ -112,7 +113,7 @@ export default function EncuestasPage() {
       }
       setShowModal(false);
       fetchInitialData();
-    } catch (err) { alert('Error al guardar'); } finally { setGuardando(false); }
+    } catch (err) { notificar('Error al guardar'); } finally { setGuardando(false); }
   };
 
   const handleEliminarEncuesta = async (id: number) => {

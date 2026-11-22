@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
+import { notificar } from '../../lib/notificar';
 
 export default function SolidarioPage() {
   const [user, setUser] = useState<any>(null);
@@ -99,8 +100,8 @@ export default function SolidarioPage() {
   // --- ACCIONES SOCIO ---
   const handleEnviarAporte = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!archivoAporte) return alert("Sube el comprobante de transferencia.");
-    if (!sindicatoIdActual) return alert("Error: No se detectó el sindicato activo.");
+    if (!archivoAporte) return notificar("Sube el comprobante de transferencia.");
+    if (!sindicatoIdActual) return notificar("Error: No se detectó el sindicato activo.");
     
     setEnviandoAporte(true);
     try {
@@ -122,16 +123,16 @@ export default function SolidarioPage() {
         estado: 'Pendiente'
       }]);
 
-      alert("✅ Aporte enviado para revisión. ¡Gracias por tu solidaridad!");
+      notificar("✅ Aporte enviado para revisión. ¡Gracias por tu solidaridad!");
       setShowAportarModal(false);
       setMontoAporte(''); setArchivoAporte(null);
       fetchSolidarioData();
-    } catch (err: any) { alert("Error: " + err.message); } finally { setEnviandoAporte(false); }
+    } catch (err: any) { notificar("Error: " + err.message); } finally { setEnviandoAporte(false); }
   };
 
   const handleEnviarSolicitud = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sindicatoIdActual) return alert("Error: No se detectó el sindicato activo.");
+    if (!sindicatoIdActual) return notificar("Error: No se detectó el sindicato activo.");
     
     setEnviandoSolicitud(true);
     try {
@@ -144,11 +145,11 @@ export default function SolidarioPage() {
         descripcion: descripcion, 
         estado: 'En Revisión'
       }]);
-      alert("✅ Solicitud de auxilio enviada al directorio.");
+      notificar("✅ Solicitud de auxilio enviada al directorio.");
       setShowSolicitarModal(false);
       setMontoSolicitado(''); setDescripcion('');
       fetchSolidarioData();
-    } catch (err: any) { alert("Error: " + err.message); } finally { setEnviandoSolicitud(false); }
+    } catch (err: any) { notificar("Error: " + err.message); } finally { setEnviandoSolicitud(false); }
   };
 
   // --- ACCIONES ADMIN ---
@@ -168,8 +169,8 @@ export default function SolidarioPage() {
       setMeta(parseInt(nuevaMeta));
       setShowMetaModal(false);
       setNuevaMeta('');
-      alert("✅ Meta actualizada con éxito para tu organización.");
-    } catch (err) { alert("Error al guardar la meta."); } finally { setGuardandoMeta(false); }
+      notificar("✅ Meta actualizada con éxito para tu organización.");
+    } catch (err) { notificar("Error al guardar la meta."); } finally { setGuardandoMeta(false); }
   };
 
   const handleCambiarEstadoAporte = async (id: number, nuevoEstado: string) => {

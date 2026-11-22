@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import Footer from '../components/Footer';
+import Notificaciones from '../components/Notificaciones';
 
 export const metadata: Metadata = {
   title: 'Sindicato - Portal Institucional',
@@ -23,6 +24,7 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased m-0 p-0 selection:bg-blue-600 selection:text-white">
+        <Notificaciones />
         
         {/* Contenido principal: cada sección/layout maneja su propio Navbar multi-tenant */}
         <div className="flex-1 flex flex-col w-full m-0 p-0">

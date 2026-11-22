@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "../app/lib/supabase";
 import Campanita from "./Campanita";
 import { motion, AnimatePresence } from "framer-motion";
+import { notificar } from '../app/lib/notificar';
 
 // ─── Colores por rol ───────────────────────────────────────────────────────────
 const ROL_COLORS: Record<string, { text: string; border: string; bg: string; glow: string }> = {
@@ -194,7 +195,7 @@ export default function Navbar() {
       await supabase.from('sindicatos').update({ nombre: editTenantName, logo_url: finalLogoUrl.trim() !== '' ? finalLogoUrl.trim() : '/logopyf.jpeg' }).eq('id', tenantId);
       setShowTenantModal(false);
       setLogoFile(null);
-    } catch (err: any) { alert("Error al actualizar: " + err.message); } finally { setSavingTenant(false); }
+    } catch (err: any) { notificar("Error al actualizar: " + err.message); } finally { setSavingTenant(false); }
   };
 
   const getInitials = (name: string) => {

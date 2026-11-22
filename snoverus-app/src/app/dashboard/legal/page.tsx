@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase';
+import { notificar } from '../../lib/notificar';
 
 export default function LegalPage() {
   // 🛡️ Estado de Rol y RUT del Socio Activo
@@ -56,9 +57,9 @@ export default function LegalPage() {
     setAgendando(false);
 
     if (error) {
-      alert('Error al agendar: ' + error.message);
+      notificar('Error al agendar: ' + error.message);
     } else {
-      alert('✅ ¡Tu hora ha sido solicitada! Espera la confirmación de la directiva.');
+      notificar('✅ ¡Tu hora ha sido solicitada! Espera la confirmación de la directiva.');
       setMotivo(''); setFecha(''); setHora('');
       fetchReservas(rutUsuario);
     }

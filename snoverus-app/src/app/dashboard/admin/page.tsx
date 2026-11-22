@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import emailjs from '@emailjs/browser';
 import { createClient } from '../../lib/supabase';
+import TendenciasSindicato from './TendenciasSindicato';
 
-// --- CONFIGURACIÓN EMAILJS EXCLUSIVA PARA INCORPORACIÓN DE SOCIOS ---
+// --- CONFIGURACIÓN EMAILJS (.env.local / Vercel) ---
 const EMAILJS_SERVICE_ID =
   process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID || 'service_thw7gfn';
 const EMAILJS_TEMPLATE_SOCIO_ID =
@@ -21,6 +22,19 @@ function obtenerBaseUrlPublica(): string {
   return '';
 }
 
+const MODULOS_BASE: Record<string, { label: string; desc: string }> = {
+  beneficios:  { label: 'Beneficios',  desc: 'Convenios y descuentos corporativos' },
+  legal:       { label: 'Legal AI',    desc: 'Asistente jurídico laboral con IA' },
+  credencial:  { label: 'Credencial',  desc: 'ID digital con código QR de socio' },
+  asistencia:  { label: 'Asistencia',  desc: 'Registro de entrada/salida y escáner' },
+  actas:       { label: 'Actas',       desc: 'Repositorio de documentos oficiales' },
+  finanzas:    { label: 'Finanzas',    desc: 'Balances y transparencia sindical' },
+  encuestas:   { label: 'Votaciones',  desc: 'Urna digital y participación activa' },
+  negociacion: { label: 'Negociación', desc: 'Avances de contratos colectivos' },
+  solidario:   { label: 'Solidario',   desc: 'Fondo de apoyo y ayudas mutuas' },
+  soporte:     { label: 'Soporte',     desc: 'Mesa de ayuda y tickets de socios' },
+};
+
 type AdminTab =
   | 'postulaciones'
   | 'estadisticas'
@@ -30,49 +44,17 @@ type AdminTab =
   | 'modulos'
   | 'tema';
 
-const MODULOS_BASE: Record<string, { label: string; desc: string }> = {
-  beneficios: { label: 'Beneficios', desc: 'Convenios y descuentos para socios' },
-  legal: { label: 'Asesoría Legal', desc: 'Orientación jurídica laboral con IA' },
-  credencial: { label: 'Credencial Digital', desc: 'Carnet de socio con código QR' },
-  asistencia: { label: 'Asistencia', desc: 'Registro de entrada y salida en asambleas' },
-  actas: { label: 'Actas y Documentos', desc: 'Archivo oficial del sindicato' },
-  finanzas: { label: 'Finanzas', desc: 'Balances y transparencia de fondos' },
-  encuestas: { label: 'Votaciones', desc: 'Consultas y votaciones internas' },
-  negociacion: { label: 'Negociación', desc: 'Avances de contratos colectivos' },
-  solidario: { label: 'Fondo Solidario', desc: 'Apoyo mutuo y ayudas de emergencia' },
-  soporte: { label: 'Mesa de Ayuda', desc: 'Consultas y tickets de socios' },
-};
-
-const PALETAS_PRESET = [
-  {
-    nombre: 'Clásico PYC (Dorado)',
-    fondo_base: '#0b0e14',
-    color_tarjetas: '#121722',
-    color_acento: '#e5b32a',
-    color_borde: '#252e42',
-  },
-  {
-    nombre: 'Océano Institucional',
-    fondo_base: '#090f1d',
-    color_tarjetas: '#131d31',
-    color_acento: '#38bdf8',
-    color_borde: '#22304a',
-  },
-  {
-    nombre: 'Esmeralda Sindical',
-    fondo_base: '#091311',
-    color_tarjetas: '#11201d',
-    color_acento: '#34d399',
-    color_borde: '#1e3832',
-  },
-  {
-    nombre: 'Azul Ejecutivo',
-    fondo_base: '#0b0d17',
-    color_tarjetas: '#15192b',
-    color_acento: '#818cf8',
-    color_borde: '#282f4d',
-  },
-];
+interface CredencialesSocioAprobado {
+  ordenSocio: string;
+  fullName: string;
+  rut: string;
+  email: string;
+  password: string;
+  codigoCorreo: string;
+  linkValidacion: string;
+  role: string;
+  correoEnviado: boolean;
+}
 
 function esCargoDirectivo(rol?: string | null): boolean {
   return ['admin', 'administrador', 'directiva', 'presidente'].includes(
@@ -80,16 +62,20 @@ function esCargoDirectivo(rol?: string | null): boolean {
   );
 }
 
-function formatRutLegible(raw?: string | null): string {
-  const clean = String(raw || '').replace(/[^0-9kK]/g, '').toUpperCase();
-  if (clean.length < 2) return raw || 'Sin RUT';
-  return `${clean.slice(0, -1)}-${clean.slice(-1)}`;
+function formatRutConPuntosYGuion(raw?: string | null): string {
+  const clean = String(raw || '').replace(/[^0-9kK]/g, '').toUpperCase().slice(0, 9);
+  if (clean.length <= 1) return clean || 'Sin RUT';
+  const body = clean.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${body}-${clean.slice(-1)}`;
 }
 
-function formatRutInputSinPuntos(value: string): string {
-  const clean = value.replace(/[^0-9kK]/g, '').toUpperCase().slice(0, 9);
-  if (clean.length <= 1) return clean;
-  return `${clean.slice(0, -1)}-${clean.slice(-1)}`;
+// Una asistencia pertenece a una asamblea por su asamblea_id (migración 001).
+// Si el registro es antiguo y no tiene asamblea_id, se compara por título como antes.
+function perteneceAAsamblea(asistencia: any, asamblea: any): boolean {
+  return asistencia.asamblea_id != null
+    ? Number(asistencia.asamblea_id) === Number(asamblea.id)
+    : asistencia.asamblea_titulo?.trim().toLowerCase() ===
+        asamblea.titulo?.trim().toLowerCase();
 }
 
 async function copiarTextoSeguro(texto: string): Promise<boolean> {
@@ -99,46 +85,40 @@ async function copiarTextoSeguro(texto: string): Promise<boolean> {
       return true;
     }
   } catch {
-    // Fallback
+    // Fallback para navegadores con restricciones
   }
   try {
-    const el = document.createElement('textarea');
-    el.value = texto;
-    el.style.position = 'fixed';
-    el.style.opacity = '0';
-    document.body.appendChild(el);
-    el.select();
+    const textarea = document.createElement('textarea');
+    textarea.value = texto;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
     document.execCommand('copy');
-    document.body.removeChild(el);
+    document.body.removeChild(textarea);
     return true;
   } catch {
     return false;
   }
 }
 
-function AdminDashboardContent() {
+export default function AdminPanel() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [validando, setValidando] = useState(true);
-  const [actualizando, setActualizando] = useState(false);
-
-  // Sesión y contexto multi-tenant
-  const [perfilActual, setPerfilActual] = useState<any>(null);
-  const [userRol, setUserRol] = useState<string>('admin');
-  const [idSindicatoActual, setIdSindicatoActual] = useState<number | null>(null);
-  const [sindicatosDisponibles, setSindicatosDisponibles] = useState<any[]>([]);
-  const [sindicatoInfo, setSindicatoInfo] = useState<any>(null);
-
-  // Navegación y avisos
   const [activeTab, setActiveTab] = useState<AdminTab>('postulaciones');
   const [aviso, setAviso] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
-  const [errorPostulacion, setErrorPostulacion] = useState<{
-    id: number;
-    nombre: string;
-    mensaje: string;
-  } | null>(null);
 
-  // Datos principales
+  // Contexto usuario y sindicato
+  const [userRol, setUserRol] = useState<string>('admin');
+  const [adminNombre, setAdminNombre] = useState<string>('Directiva');
+  const [adminUserId, setAdminUserId] = useState<string | null>(null);
+  const [idSindicatoActual, setIdSindicatoActual] = useState<number | null>(null);
+  const [listaSindicatosSA, setListaSindicatosSA] = useState<any[]>([]);
+  const [sindicatoInfo, setSindicatoInfo] = useState<any>(null);
+  const [actualizando, setActualizando] = useState(false);
+
+  // Datos del sindicato
   const [postulaciones, setPostulaciones] = useState<any[]>([]);
   const [socios, setSocios] = useState<any[]>([]);
   const [historialAsambleas, setHistorialAsambleas] = useState<any[]>([]);
@@ -149,6 +129,16 @@ function AdminDashboardContent() {
   const [filtroPost, setFiltroPost] = useState<'Todas' | 'Pendientes' | 'Aprobadas' | 'Rechazadas'>('Todas');
   const [busquedaPost, setBusquedaPost] = useState('');
   const [procesandoId, setProcesandoId] = useState<number | null>(null);
+  const [escaladosIds, setEscaladosIds] = useState<Record<number, boolean>>({});
+  const [errorPostulacion, setErrorPostulacion] = useState<{
+    id: number;
+    nombre: string;
+    mensaje: string;
+  } | null>(null);
+  const [credSocioAprobado, setCredSocioAprobado] = useState<CredencialesSocioAprobado | null>(null);
+  const [postARechazar, setPostARechazar] = useState<any>(null);
+
+  // Modal Agregar Postulante
   const [modalNuevoPostulante, setModalNuevoPostulante] = useState(false);
   const [formNuevoPost, setFormNuevoPost] = useState({
     full_name: '',
@@ -157,55 +147,52 @@ function AdminDashboardContent() {
     telefono: '',
     rol_solicitado: 'socio',
   });
-  const [postARechazar, setPostARechazar] = useState<any>(null);
-  const [credSocioAprobado, setCredSocioAprobado] = useState<{
-    ordenSocio: string;
-    fullName: string;
-    rut: string;
-    email: string;
-    password: string;
-    codigoCorreo: string;
-    linkValidacion: string;
-    role: string;
-    correoEnviado: boolean;
-  } | null>(null);
-  const [escaladosIds, setEscaladosIds] = useState<Record<number, boolean>>({});
 
   // Estados de Asambleas
   const [tituloNuevaAsamblea, setTituloNuevaAsamblea] = useState('');
   const [creandoAsamblea, setCreandoAsamblea] = useState(false);
   const [asambleaAEliminar, setAsambleaAEliminar] = useState<any>(null);
 
-  // Estados de Notificaciones
-  const [notifDestino, setNotifDestino] = useState<string>('todos');
+  // Estados de Avisos / Notificaciones
+  const [notifDestino, setNotifDestino] = useState('todos');
   const [notifTitulo, setNotifTitulo] = useState('');
   const [notifMensaje, setNotifMensaje] = useState('');
   const [enviandoNotif, setEnviandoNotif] = useState(false);
 
-  // Estados de Padrón de Socios
+  // Estados de Socios
   const [busquedaSocio, setBusquedaSocio] = useState('');
   const [socioEdit, setSocioEdit] = useState<any>(null);
-  const [formSocioEdit, setFormSocioEdit] = useState({ role: 'socio', estado: 'activo' });
+  const [formSocioEdit, setFormSocioEdit] = useState({
+    role: 'socio',
+    estado: 'activo',
+  });
 
-  // Estados de Módulos y Apariencia
-  const [modulosActivos, setModulosActivos] = useState<Record<string, boolean>>(() => {
-    const base: Record<string, boolean> = {};
-    Object.keys(MODULOS_BASE).forEach((k) => {
-      base[k] = true;
-    });
-    return base;
+  // Estados de Módulos (Soft Delete)
+  const [modulosActivos, setModulosActivos] = useState<Record<string, boolean>>({
+    beneficios: true,
+    legal: true,
+    credencial: true,
+    asistencia: true,
+    actas: true,
+    finanzas: true,
+    encuestas: true,
+    negociacion: true,
+    solidario: true,
+    soporte: true,
   });
   const [guardandoModulo, setGuardandoModulo] = useState<string | null>(null);
+
+  // Estados de Apariencia (JSONB)
   const [configTema, setConfigTema] = useState({
     tema: {
-      fondo_base: '#0b0e14',
-      color_tarjetas: '#121722',
+      fondo_base: '#090d16',
+      color_tarjetas: '#131b2e',
       color_acento: '#e5b32a',
-      color_borde: '#252e42',
+      color_borde: '#1e293b',
     },
     hero: {
-      titulo: 'Tu sindicato, unido y digital.',
-      subtitulo: 'Beneficios, actas, votaciones y respaldo en un solo lugar.',
+      titulo: 'Unidos Somos Más Fuertes.',
+      subtitulo: 'Fondo solidario, contención y apoyo mutuo ante cualquier emergencia.',
     },
   });
   const [guardandoTema, setGuardandoTema] = useState(false);
@@ -221,7 +208,6 @@ function AdminDashboardContent() {
     setActualizando(true);
     try {
       const supabase = createClient();
-
       const [sindRes, postRes, usrRes, histRes, asistRes, comRes] = await Promise.all([
         supabase.from('sindicatos').select('*').eq('id', targetId).maybeSingle(),
         supabase
@@ -262,6 +248,15 @@ function AdminDashboardContent() {
         });
         setModulosActivos(normalizados);
 
+        const alertasSA = sindRes.data.config_ui?.alertas_superadmin;
+        if (Array.isArray(alertasSA)) {
+          const mapaEsc: Record<number, boolean> = {};
+          alertasSA.forEach((a: any) => {
+            if (a.postulacion_id) mapaEsc[Number(a.postulacion_id)] = true;
+          });
+          setEscaladosIds(mapaEsc);
+        }
+
         if (sindRes.data.configuracion) {
           setConfigTema((prev) => ({
             tema: { ...prev.tema, ...(sindRes.data.configuracion.tema || {}) },
@@ -288,7 +283,6 @@ function AdminDashboardContent() {
   useEffect(() => {
     if (!mounted) return;
     const supabase = createClient();
-    let rtChannel: any = null;
 
     const iniciar = async () => {
       const {
@@ -306,106 +300,96 @@ function AdminDashboardContent() {
         .eq('id', user.id)
         .maybeSingle();
 
-      const rol = String(perfil?.role || 'socio').trim().toLowerCase();
+      const rol = String(perfil?.role || '').trim().toLowerCase();
       if (!['superadmin', 'admin', 'administrador', 'directiva', 'presidente'].includes(rol)) {
         router.push('/dashboard');
         return;
       }
 
-      setPerfilActual(perfil);
       setUserRol(rol);
+      setAdminUserId(user.id);
+      setAdminNombre(perfil?.full_name || user.email || 'Directiva');
 
-      let targetSindId: number | null = perfil?.sindicato_id ? Number(perfil.sindicato_id) : null;
+      let targetId: number | null = perfil?.sindicato_id ? Number(perfil.sindicato_id) : null;
 
       if (rol === 'superadmin') {
         const { data: allSinds } = await supabase
           .from('sindicatos')
-          .select('id, nombre, estado, validado')
+          .select('id, nombre')
           .order('id', { ascending: true });
-
-        if (Array.isArray(allSinds) && allSinds.length > 0) {
-          setSindicatosDisponibles(allSinds);
+        if (Array.isArray(allSinds)) {
+          setListaSindicatosSA(allSinds);
           const cached = localStorage.getItem('sindicato_activo');
-          const cachedNum = cached ? Number(cached) : null;
-          const existeCached = cachedNum && allSinds.some((s) => Number(s.id) === cachedNum);
-          targetSindId = existeCached ? cachedNum : Number(allSinds[0].id);
+          if (cached && allSinds.some((s) => Number(s.id) === Number(cached))) {
+            targetId = Number(cached);
+          } else if (!targetId && allSinds.length > 0) {
+            targetId = Number(allSinds[0].id);
+          }
         }
       }
 
-      setIdSindicatoActual(targetSindId);
+      setIdSindicatoActual(targetId);
       setValidando(false);
 
-      if (targetSindId) {
-        localStorage.setItem('sindicato_activo', String(targetSindId));
-        await cargarDatosSindicato(targetSindId);
-
-        rtChannel = supabase
-          .channel(`admin-live-${targetSindId}-${Date.now()}`)
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'postulaciones', filter: `sindicato_id=eq.${targetSindId}` },
-            () => cargarDatosSindicato(targetSindId!)
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'asistencia_asambleas', filter: `sindicato_id=eq.${targetSindId}` },
-            () => cargarDatosSindicato(targetSindId!)
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'profiles', filter: `sindicato_id=eq.${targetSindId}` },
-            () => cargarDatosSindicato(targetSindId!)
-          )
-          .subscribe();
+      if (targetId) {
+        await cargarDatosSindicato(targetId);
       }
     };
 
     iniciar();
-
-    return () => {
-      if (rtChannel) supabase.removeChannel(rtChannel);
-    };
   }, [mounted, router, cargarDatosSindicato]);
 
-  // Cambiar de sindicato (solo SuperAdmin)
-  const handleCambiarSindicato = async (nuevoIdStr: string) => {
-    const nuevoId = Number(nuevoIdStr);
-    if (!nuevoId) return;
-    setErrorPostulacion(null);
-    setIdSindicatoActual(nuevoId);
+  // Suscripción Realtime por sindicato activo
+  useEffect(() => {
+    if (!idSindicatoActual) return;
+    const supabase = createClient();
+
+    const rtChannel = supabase
+      .channel(`admin-live-${idSindicatoActual}-${Date.now()}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'postulaciones', filter: `sindicato_id=eq.${idSindicatoActual}` },
+        () => cargarDatosSindicato(idSindicatoActual)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `sindicato_id=eq.${idSindicatoActual}` },
+        () => cargarDatosSindicato(idSindicatoActual)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'asistencia_asambleas', filter: `sindicato_id=eq.${idSindicatoActual}` },
+        () => cargarDatosSindicato(idSindicatoActual)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'historial_asambleas', filter: `sindicato_id=eq.${idSindicatoActual}` },
+        () => cargarDatosSindicato(idSindicatoActual)
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'sindicatos', filter: `id=eq.${idSindicatoActual}` },
+        () => cargarDatosSindicato(idSindicatoActual)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(rtChannel);
+    };
+  }, [idSindicatoActual, cargarDatosSindicato]);
+
+  const handleCambiarSindicatoSA = async (nuevoId: number) => {
     localStorage.setItem('sindicato_activo', String(nuevoId));
-    await cargarDatosSindicato(nuevoId);
-    notificar('Cambiaste de organización correctamente.');
-  };
-
-  // --- DEVOLVER POSTULACIÓN A PENDIENTE ---
-  const handleVolverAPendiente = async (post: any) => {
-    setProcesandoId(post.id);
+    setIdSindicatoActual(nuevoId);
     setErrorPostulacion(null);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from('postulaciones')
-        .update({ estado: 'Pendiente' })
-        .eq('id', post.id);
-      if (error) throw error;
-
-      setActiveTab('postulaciones');
-      setFiltroPost('Pendientes');
-      if (idSindicatoActual) await cargarDatosSindicato(idSindicatoActual);
-      notificar(`La postulación de ${post.full_name} volvió a Pendientes para aprobarla nuevamente.`);
-    } catch (err: any) {
-      notificar(err.message || 'No se pudo devolver la postulación a Pendiente.', 'err');
-    } finally {
-      setProcesandoId(null);
-    }
+    await cargarDatosSindicato(nuevoId);
+    notificar(`Cambiado al sindicato #${nuevoId}.`);
   };
 
-  // --- APROBAR POSTULACIÓN: CREA USUARIO EN BD + ENVÍA ORDEN DE INCORPORACIÓN ---
+  // --- APROBAR POSTULACIÓN (RPC BCRYPT 6 DÍGITOS + PLANTILLA EMAILJS DEDICADA SOCIOS) ---
   const handleAprobarPostulacion = async (post: any) => {
-    const esDir = esCargoDirectivo(post.rol_solicitado);
-    if (esDir && userRol !== 'superadmin') {
-      notificar('Solo un SuperAdmin puede aprobar cargos de Directiva o Presidencia.', 'err');
+    if (esCargoDirectivo(post.rol_solicitado) && userRol !== 'superadmin') {
+      notificar('Los cargos de directiva requieren autorización del SuperAdmin.', 'err');
       return;
     }
 
@@ -414,7 +398,7 @@ function AdminDashboardContent() {
     const supabase = createClient();
 
     try {
-      // 1. RPC atómico: crea el socio en auth.users + public.profiles con código Bcrypt
+      // 1. RPC atómico: crea el socio en auth.users + public.profiles con código de 6 dígitos Bcrypt
       const { data: rpcRes, error: rpcErr } = await supabase.rpc('aprobar_postulacion_socio', {
         p_postulacion_id: post.id,
       });
@@ -446,7 +430,7 @@ function AdminDashboardContent() {
         role: String(rpcRes.role),
       };
 
-      // 2. Despachar Orden de Incorporación de Socio vía plantilla dedicada (NEXT_PUBLIC_EMAILJS_TEMPLATE_SOCIO_ID)
+      // 2. Despachar Orden de Incorporación vía plantilla dedicada de Socios en EmailJS
       const ordenSocio = `INC-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
       const rolEtiqueta = credData.role === 'admin' ? 'Directivo' : 'Socio';
       let correoEnviado = false;
@@ -464,7 +448,7 @@ function AdminDashboardContent() {
               sindicato_id: String(idSindicatoActual || ''),
               rol_asignado: rolEtiqueta,
               codigo_correo: credData.codigo_correo,
-              socio_rut: formatRutLegible(credData.rut),
+              socio_rut: formatRutConPuntosYGuion(credData.rut),
               socio_password: credData.password,
               link_validacion: linkValidacion,
               fecha: new Date().toLocaleDateString('es-CL'),
@@ -475,10 +459,6 @@ function AdminDashboardContent() {
         } catch (emailErr) {
           console.error('Error EmailJS incorporación socio:', emailErr);
         }
-      } else {
-        console.warn(
-          'Falta NEXT_PUBLIC_EMAILJS_TEMPLATE_SOCIO_ID o NEXT_PUBLIC_EMAILJS_PUBLIC_KEY en .env.local.'
-        );
       }
 
       setCredSocioAprobado({
@@ -496,16 +476,13 @@ function AdminDashboardContent() {
       if (idSindicatoActual) await cargarDatosSindicato(idSindicatoActual);
       notificar(
         correoEnviado
-          ? `${post.full_name} agregado a la BD y orden ${ordenSocio} enviada a ${credData.email}.`
-          : `${post.full_name} agregado a la BD (verifica NEXT_PUBLIC_EMAILJS_TEMPLATE_SOCIO_ID o copia los datos del resumen).`
+          ? `${post.full_name} aprobado y Orden ${ordenSocio} enviada a ${credData.email}.`
+          : `${post.full_name} agregado a la base de datos (copia el enlace y código desde el resumen).`
       );
     } catch (err: any) {
-      // Rollback a Pendiente si hubo error
+      // Rollback automático a Pendiente si ocurrió un error
       try {
-        await supabase
-          .from('postulaciones')
-          .update({ estado: 'Pendiente' })
-          .eq('id', post.id);
+        await supabase.from('postulaciones').update({ estado: 'Pendiente' }).eq('id', post.id);
       } catch {
         // Ignorar fallo secundario
       }
@@ -520,6 +497,28 @@ function AdminDashboardContent() {
       });
       if (idSindicatoActual) await cargarDatosSindicato(idSindicatoActual);
       notificar(`No se pudo aprobar a ${post.full_name}. Volvió a Pendientes para reintentar.`, 'err');
+    } finally {
+      setProcesandoId(null);
+    }
+  };
+
+  // --- VOLVER POSTULACIÓN A PENDIENTE ---
+  const handleVolverAPendiente = async (post: any) => {
+    setProcesandoId(post.id);
+    setErrorPostulacion(null);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('postulaciones')
+        .update({ estado: 'Pendiente' })
+        .eq('id', post.id);
+      if (error) throw error;
+
+      setFiltroPost('Pendientes');
+      if (idSindicatoActual) await cargarDatosSindicato(idSindicatoActual);
+      notificar(`La postulación de ${post.full_name} volvió a Pendientes.`);
+    } catch (err: any) {
+      notificar(err.message || 'No se pudo devolver a Pendiente.', 'err');
     } finally {
       setProcesandoId(null);
     }
@@ -569,7 +568,7 @@ function AdminDashboardContent() {
         postulacion_id: post.id,
         tipo: 'Cargo Directivo',
         titulo: `Autorización Directiva: ${post.full_name}`,
-        mensaje: `El admin de ${sindicatoInfo?.nombre || `Sindicato #${idSindicatoActual}`} solicita validar a ${post.full_name} (RUT ${post.rut}, ${post.email}) como Directivo.`,
+        mensaje: `El admin de ${sindicatoInfo?.nombre || `Sindicato #${idSindicatoActual}`} solicita validar a ${post.full_name} (RUT ${formatRutConPuntosYGuion(post.rut)}, ${post.email}) como Directivo.`,
         created_at: new Date().toISOString(),
         leido: false,
       };
@@ -600,7 +599,7 @@ function AdminDashboardContent() {
 
     const cleanRut = formNuevoPost.rut.replace(/[^0-9kK]/g, '').toUpperCase();
     if (cleanRut.length < 8) {
-      notificar('Ingresa un RUT completo (ej: 15432198-5).', 'err');
+      notificar('Ingresa un RUT completo (ej: 15.432.198-5).', 'err');
       return;
     }
 
@@ -640,6 +639,8 @@ function AdminDashboardContent() {
         {
           sindicato_id: idSindicatoActual,
           titulo: tituloNuevaAsamblea.trim(),
+          created_by: adminUserId,
+          creador_nombre: adminNombre,
         },
       ]);
       if (error) throw error;
@@ -664,12 +665,71 @@ function AdminDashboardContent() {
         .eq('id', asambleaAEliminar.id);
       if (error) throw error;
 
+      // Limpiar asistencias asociadas (por asamblea_id o por título legado)
+      await supabase
+        .from('asistencia_asambleas')
+        .delete()
+        .eq('sindicato_id', idSindicatoActual)
+        .or(`asamblea_id.eq.${asambleaAEliminar.id},asamblea_titulo.eq.${asambleaAEliminar.titulo}`);
+
       setAsambleaAEliminar(null);
       await cargarDatosSindicato(idSindicatoActual);
-      notificar('Sesión de asamblea eliminada.');
+      notificar('Sesión de asamblea y asistencias asociadas eliminadas.');
     } catch (err: any) {
       notificar(err.message || 'No se pudo eliminar la asamblea.', 'err');
     }
+  };
+
+  // --- EXPORTADORES CSV (PADRÓN Y ASISTENCIAS) ---
+  const exportarPadronCSV = () => {
+    const sindNombre = sindicatoInfo?.nombre || `Sindicato_${idSindicatoActual}`;
+    const headers = ['Nombre_Completo', 'RUT', 'Correo', 'Rol', 'Estado', 'Sindicato'];
+    const filas = socios.map((u) =>
+      [
+        `"${(u.full_name || 'Sin Nombre').replace(/"/g, '""')}"`,
+        formatRutConPuntosYGuion(u.rut),
+        u.email || '',
+        u.role || 'socio',
+        u.estado || 'activo',
+        `"${sindNombre.replace(/"/g, '""')}"`,
+      ].join(',')
+    );
+    const blob = new Blob(['\uFEFF' + [headers.join(','), ...filas].join('\n')], {
+      type: 'text/csv;charset=utf-8;',
+    });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', `Padron_${sindNombre}_${new Date().toLocaleDateString('es-CL')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    notificar('Padrón de socios descargado en CSV.');
+  };
+
+  const exportarAsistenciaCSV = () => {
+    const sindNombre = sindicatoInfo?.nombre || `Sindicato_${idSindicatoActual}`;
+    const headers = ['Asamblea', 'Nombre_Socio', 'RUT', 'Rol', 'Hora_Entrada', 'Hora_Salida', 'Operador'];
+    const filas = asistencias.map((a) =>
+      [
+        `"${(a.asamblea_titulo || 'Sesión').replace(/"/g, '""')}"`,
+        `"${(a.usuario_nombre || 'Socio').replace(/"/g, '""')}"`,
+        formatRutConPuntosYGuion(a.usuario_rut),
+        a.usuario_rol || 'SOCIO',
+        a.hora_entrada ? new Date(a.hora_entrada).toLocaleString('es-CL') : '',
+        a.hora_salida ? new Date(a.hora_salida).toLocaleString('es-CL') : 'En Sala',
+        `"${(a.operador_nombre || adminNombre).replace(/"/g, '""')}"`,
+      ].join(',')
+    );
+    const blob = new Blob(['\uFEFF' + [headers.join(','), ...filas].join('\n')], {
+      type: 'text/csv;charset=utf-8;',
+    });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', `Asistencia_QR_${sindNombre}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    notificar('Planilla de asistencias QR descargada en CSV.');
   };
 
   // --- ENVIAR AVISO / NOTIFICACIÓN ---
@@ -679,7 +739,6 @@ function AdminDashboardContent() {
     setEnviandoNotif(true);
     try {
       const supabase = createClient();
-
       const prevAlertas = Array.isArray(sindicatoInfo?.config_ui?.alertas_socios)
         ? sindicatoInfo.config_ui.alertas_socios
         : [];
@@ -763,12 +822,11 @@ function AdminDashboardContent() {
     }
   };
 
-  // --- ENCENDER / APAGAR MÓDULO ---
-  const handleToggleModulo = async (key: string) => {
+  // --- ENCENDER / APAGAR MÓDULO (INDIVIDUAL O TODOS) ---
+  const guardarModulosEnDB = async (nuevoEstado: Record<string, boolean>, mensajeOk: string, keyFlag: string) => {
     if (!idSindicatoActual) return;
-    setGuardandoModulo(key);
+    setGuardandoModulo(keyFlag);
     try {
-      const nuevoEstado = { ...modulosActivos, [key]: !modulosActivos[key] };
       const supabase = createClient();
       const { error } = await supabase
         .from('sindicatos')
@@ -786,14 +844,33 @@ function AdminDashboardContent() {
         ...(prev || {}),
         config_ui: { ...(prev?.config_ui || {}), modulos_activos: nuevoEstado },
       }));
-      notificar(
-        `Módulo "${MODULOS_BASE[key].label}" ${nuevoEstado[key] ? 'activado' : 'ocultado'} para los socios.`
-      );
+      notificar(mensajeOk);
     } catch (err: any) {
-      notificar(err.message || 'Error al cambiar módulo.', 'err');
+      notificar(err.message || 'Error al cambiar módulos.', 'err');
     } finally {
       setGuardandoModulo(null);
     }
+  };
+
+  const handleToggleModulo = async (key: string) => {
+    const nuevoEstado = { ...modulosActivos, [key]: !modulosActivos[key] };
+    await guardarModulosEnDB(
+      nuevoEstado,
+      `Módulo "${MODULOS_BASE[key].label}" ${nuevoEstado[key] ? 'activado' : 'ocultado'} para los socios.`,
+      key
+    );
+  };
+
+  const handleCambiarTodosModulos = async (estado: boolean) => {
+    const todos: Record<string, boolean> = {};
+    Object.keys(MODULOS_BASE).forEach((k) => {
+      todos[k] = estado;
+    });
+    await guardarModulosEnDB(
+      todos,
+      estado ? 'Se activaron las 10 secciones del portal.' : 'Se ocultaron todas las secciones secundarias.',
+      'ALL'
+    );
   };
 
   // --- GUARDAR APARIENCIA DEL PORTAL ---
@@ -817,6 +894,14 @@ function AdminDashboardContent() {
     }
   };
 
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    document.cookie = 'sb-sindicato-session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    document.cookie = 'sb-sindicato-rol=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    router.push('/');
+  };
+
   if (!mounted || validando) {
     return (
       <div
@@ -829,7 +914,7 @@ function AdminDashboardContent() {
     );
   }
 
-  // Contadores
+  // Contadores y filtros
   const postPendientes = postulaciones.filter(
     (p) => !p.estado || p.estado === 'Pendiente' || p.estado === 'En Revisión'
   );
@@ -866,6 +951,18 @@ function AdminDashboardContent() {
 
   const modulosEncendidosCount = Object.values(modulosActivos).filter(Boolean).length;
   const totalModulosCount = Object.keys(MODULOS_BASE).length;
+  const sociosEnSala = asistencias.filter((a) => !a.hora_salida).length;
+
+  const promedioAsistencia =
+    historialAsambleas.length > 0
+      ? Math.round(asistencias.length / historialAsambleas.length)
+      : 0;
+  const quorumPromedioPct =
+    socios.length > 0
+      ? Math.min(Math.round((promedioAsistencia / socios.length) * 100), 100)
+      : 0;
+
+  const sindicatoNombreActual = sindicatoInfo?.nombre || `Sindicato #${idSindicatoActual || ''}`;
 
   const menuItems: { id: AdminTab; titulo: string; subtitulo: string; badge?: string | number }[] = [
     {
@@ -877,7 +974,7 @@ function AdminDashboardContent() {
     {
       id: 'estadisticas',
       titulo: 'Resumen',
-      subtitulo: 'Números del sindicato',
+      subtitulo: 'Números y tendencias',
     },
     {
       id: 'asambleas',
@@ -908,10 +1005,7 @@ function AdminDashboardContent() {
   ];
 
   return (
-    <div
-      suppressHydrationWarning
-      className="w-full bg-[#0b0e14] text-slate-100 font-sans antialiased box-border"
-    >
+    <div className="min-h-screen w-full bg-[#0b0e14] text-slate-100 font-sans antialiased box-border">
       {/* NOTIFICACIÓN FLOTANTE */}
       {aviso && (
         <div
@@ -931,43 +1025,52 @@ function AdminDashboardContent() {
           <button
             type="button"
             onClick={() => setAviso(null)}
-            className="text-slate-300 hover:text-white font-semibold px-1 cursor-pointer"
+            className="text-slate-300 hover:text-white text-sm font-semibold px-1 cursor-pointer"
+            aria-label="Cerrar mensaje"
           >
             ✕
           </button>
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row min-h-[calc(100vh-4rem)] w-full">
-        {/* ================= BARRA LATERAL MINIMALISTA ================= */}
+      <div className="flex flex-col lg:flex-row min-h-screen w-full">
+        {/* ================= BARRA LATERAL ================= */}
         <aside className="w-full lg:w-72 bg-[#10141e] border-b lg:border-b-0 lg:border-r border-[#232a3b] flex flex-col justify-between shrink-0">
           <div>
-            <div className="p-5 border-b border-[#232a3b] space-y-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-[#e5b32a] text-[#0b0e14] font-bold text-sm flex items-center justify-center shrink-0">
-                  #{idSindicatoActual || '—'}
+            {/* Identidad del Sindicato */}
+            <div className="px-5 py-5 border-b border-[#232a3b] space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-[#e5b32a] text-[#0b0e14] font-bold text-sm flex items-center justify-center shrink-0">
+                    #{idSindicatoActual || '-'}
+                  </div>
+                  <div className="min-w-0">
+                    <h1 className="text-base font-semibold text-white leading-tight truncate">
+                      {sindicatoNombreActual}
+                    </h1>
+                    <p className="text-xs text-slate-400 truncate mt-0.5">{adminNombre}</p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <h1 className="text-base font-bold text-white leading-tight truncate">
-                    {sindicatoInfo?.nombre || 'Sindicato'}
-                  </h1>
-                  <p className="text-xs text-slate-400 truncate mt-0.5">
-                    {perfilActual?.full_name || perfilActual?.email}
-                  </p>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="lg:hidden px-3 py-1.5 rounded-lg border border-rose-500/40 text-rose-300 text-xs font-medium cursor-pointer"
+                >
+                  Salir
+                </button>
               </div>
 
-              {userRol === 'superadmin' && sindicatosDisponibles.length > 0 && (
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-[#e5b32a]">
+              {userRol === 'superadmin' && listaSindicatosSA.length > 0 && (
+                <div>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-[#e5b32a] mb-1">
                     Cambiar de sindicato
                   </label>
                   <select
                     value={idSindicatoActual || ''}
-                    onChange={(e) => handleCambiarSindicato(e.target.value)}
-                    className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#e5b32a] cursor-pointer"
+                    onChange={(e) => handleCambiarSindicatoSA(Number(e.target.value))}
+                    className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-lg px-2.5 py-2 text-xs text-white focus:outline-none focus:border-[#e5b32a] cursor-pointer"
                   >
-                    {sindicatosDisponibles.map((s) => (
+                    {listaSindicatosSA.map((s) => (
                       <option key={s.id} value={s.id}>
                         #{s.id} — {s.nombre}
                       </option>
@@ -977,7 +1080,8 @@ function AdminDashboardContent() {
               )}
             </div>
 
-            <nav className="p-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-1.5">
+            {/* Menú */}
+            <nav className="p-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-1.5">
               {menuItems.map((item) => {
                 const activo = activeTab === item.id;
                 return (
@@ -992,87 +1096,85 @@ function AdminDashboardContent() {
                     }`}
                   >
                     <div className="min-w-0">
-                      <span className="block text-sm font-semibold leading-tight truncate">{item.titulo}</span>
-                      <span className="hidden lg:block text-xs text-slate-400 mt-0.5 truncate">
+                      <div className="text-sm font-semibold leading-tight truncate">{item.titulo}</div>
+                      <div className="hidden lg:block text-xs text-slate-400 mt-0.5 truncate">
                         {item.subtitulo}
-                      </span>
+                      </div>
                     </div>
-                    {item.badge !== undefined && (
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${
-                          item.id === 'postulaciones'
-                            ? 'bg-[#e5b32a] text-[#0b0e14]'
-                            : 'bg-[#232b3e] text-slate-200'
-                        }`}
-                      >
+                    {item.badge !== undefined ? (
+                      <span className="px-2 py-0.5 rounded-full bg-[#e5b32a] text-[#0b0e14] text-xs font-bold shrink-0">
                         {item.badge}
                       </span>
-                    )}
+                    ) : null}
                   </button>
                 );
               })}
             </nav>
           </div>
 
-          <div className="p-4 border-t border-[#232a3b] flex flex-wrap lg:flex-col gap-2">
+          <div className="hidden lg:flex flex-col gap-2 p-4 border-t border-[#232a3b]">
             <Link
               href="/dashboard/asistencia"
-              className="flex-1 lg:w-full text-center py-2.5 px-3 rounded-xl text-sm font-semibold text-emerald-200 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 transition-colors"
+              className="w-full text-center py-2.5 px-3 rounded-xl text-sm font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-colors"
             >
-              Abrir Escáner de Asistencia
+              Abrir Escáner QR
             </Link>
-
             {userRol === 'superadmin' && (
               <Link
                 href="/superadmin"
-                className="flex-1 lg:w-full text-center py-2.5 px-3 rounded-xl text-sm font-semibold text-[#f3c64f] bg-[#e5b32a]/10 hover:bg-[#e5b32a]/20 border border-[#e5b32a]/35 transition-colors"
+                className="w-full text-center py-2.5 px-3 rounded-xl text-sm font-medium text-[#f3c64f] bg-[#e5b32a]/10 hover:bg-[#e5b32a]/20 border border-[#e5b32a]/30 transition-colors"
               >
-                Volver a Panel SuperAdmin
+                Panel SuperAdmin
               </Link>
             )}
-
             <Link
               href="/dashboard"
-              className="flex-1 lg:w-full text-center py-2.5 px-3 rounded-xl text-sm font-medium text-slate-200 bg-[#181f2e] hover:bg-[#222b3f] border border-[#2c354b] transition-colors"
+              className="w-full text-center py-2.5 px-3 rounded-xl text-sm font-medium text-slate-200 bg-[#181f2e] hover:bg-[#222b3f] border border-[#2c354b] transition-colors"
             >
-              ← Ver Portal de Socios
+              Ir al Portal de Socios
             </Link>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="w-full py-2.5 px-3 rounded-xl text-sm font-medium text-rose-300 hover:bg-rose-500/15 border border-rose-500/30 transition-colors cursor-pointer"
+            >
+              Cerrar Sesión
+            </button>
           </div>
         </aside>
 
-        {/* ================= CONTENIDO PRINCIPAL ================= */}
-        <section className="flex-1 min-w-0 w-full p-4 sm:p-6 lg:p-8">
+        {/* ================= ÁREA DE TRABAJO PRINCIPAL ================= */}
+        <main className="flex-1 min-w-0 w-full p-4 sm:p-6 lg:p-9">
           <div className="max-w-5xl mx-auto space-y-7">
+            {/* Barra superior */}
             <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#232a3b]">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#e5b32a]">
                   Panel de Directiva · ID #{idSindicatoActual}
                 </p>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Conectado en tiempo real con {sindicatoInfo?.nombre || 'tu sindicato'}.
+                  Conectado en tiempo real con {sindicatoNombreActual}.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={async () => {
-                    const link = `${obtenerBaseUrlPublica()}/postular?sid=${idSindicatoActual}`;
-                    const ok = await copiarTextoSeguro(link);
+                    const url = `${obtenerBaseUrlPublica()}/postular?sid=${idSindicatoActual}`;
+                    const ok = await copiarTextoSeguro(url);
                     notificar(
-                      ok
-                        ? `Enlace copiado: compártelo para que postulen directo a ${sindicatoInfo?.nombre}.`
-                        : 'No se pudo copiar el enlace.',
+                      ok ? 'Enlace de postulación copiado al portapapeles.' : 'No se pudo copiar el enlace.',
                       ok ? 'ok' : 'err'
                     );
                   }}
-                  className="px-3.5 py-2 rounded-lg bg-[#e5b32a]/15 hover:bg-[#e5b32a]/25 border border-[#e5b32a]/40 text-xs font-semibold text-[#f3c64f] cursor-pointer"
+                  className="px-3.5 py-2 rounded-lg bg-[#e5b32a]/10 hover:bg-[#e5b32a]/20 border border-[#e5b32a]/35 text-xs font-semibold text-[#f3c64f] cursor-pointer"
                 >
                   Copiar enlace de postulación
                 </button>
                 <button
                   type="button"
-                  onClick={() => idSindicatoActual && cargarDatosSindicato(idSindicatoActual)}
                   disabled={actualizando}
+                  onClick={() => idSindicatoActual && cargarDatosSindicato(idSindicatoActual)}
                   className="px-3.5 py-2 rounded-lg bg-[#161c2a] hover:bg-[#1e2638] border border-[#2c354b] text-xs font-medium text-slate-200 cursor-pointer disabled:opacity-50"
                 >
                   {actualizando ? 'Actualizando...' : 'Actualizar'}
@@ -1080,14 +1182,17 @@ function AdminDashboardContent() {
               </div>
             </div>
 
-            {/* ================= 1. POSTULACIONES ================= */}
+            {/* ==============================================================
+                TAB 1: POSTULACIONES DE INGRESO
+               ============================================================== */}
             {activeTab === 'postulaciones' && (
               <div className="space-y-6">
                 <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h2 className="text-2xl font-bold text-white">Postulaciones de Ingreso</h2>
                     <p className="text-sm text-slate-300 mt-1">
-                      Al aprobar a un socio, se agrega automáticamente a la base de datos de <strong>{sindicatoInfo?.nombre}</strong> y recibe su Orden de Incorporación para validar su correo.
+                      Al aprobar a un socio, se agrega automáticamente a la base de datos de{' '}
+                      <strong className="text-white">{sindicatoNombreActual}</strong> y recibe su Orden de Incorporación para validar su correo.
                     </p>
                   </div>
                   <button
@@ -1100,27 +1205,25 @@ function AdminDashboardContent() {
                 </header>
 
                 {errorPostulacion && (
-                  <div className="p-4 sm:p-5 rounded-2xl bg-rose-500/10 border border-rose-500/45 space-y-2">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-bold text-rose-200">
-                          No se pudo aprobar a {errorPostulacion.nombre}
-                        </p>
-                        <p className="text-xs text-rose-100/90 mt-1 leading-relaxed">
-                          {errorPostulacion.mensaje}
-                        </p>
-                        <p className="text-xs text-slate-300 mt-1.5">
-                          La solicitud quedó en <strong>Pendientes</strong> para que puedas reintentar.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setErrorPostulacion(null)}
-                        className="text-rose-200 hover:text-white text-xs font-bold px-2 cursor-pointer"
-                      >
-                        ✕
-                      </button>
+                  <div className="p-4 sm:p-5 rounded-2xl bg-rose-500/10 border border-rose-500/45 flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-rose-200">
+                        No se pudo aprobar a {errorPostulacion.nombre}
+                      </p>
+                      <p className="text-xs text-rose-100/90 mt-1 leading-relaxed">
+                        {errorPostulacion.mensaje}
+                      </p>
+                      <p className="text-xs text-slate-300 mt-1.5">
+                        La solicitud volvió automáticamente a <strong>Pendientes</strong> para que puedas reintentar.
+                      </p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setErrorPostulacion(null)}
+                      className="text-rose-200 hover:text-white text-xs font-bold px-2 cursor-pointer"
+                    >
+                      ✕
+                    </button>
                   </div>
                 )}
 
@@ -1161,7 +1264,7 @@ function AdminDashboardContent() {
                   </div>
                 </div>
 
-                {/* Filtros y buscador */}
+                {/* Filtros */}
                 <div className="flex flex-col md:flex-row gap-3 justify-between">
                   <div className="flex flex-wrap gap-2">
                     {(
@@ -1196,22 +1299,23 @@ function AdminDashboardContent() {
                   />
                 </div>
 
+                {/* Aviso de rol */}
                 <div className="px-4 py-3 rounded-xl bg-[#121722] border border-[#252e42] text-xs text-slate-300 flex items-center gap-2.5">
                   <span className="w-2 h-2 rounded-full bg-[#e5b32a] shrink-0" />
                   <span>
                     {userRol === 'superadmin'
                       ? 'Estás conectado como SuperAdmin: puedes aprobar o rechazar tanto socios como cargos de directiva.'
-                      : 'Como Administrador puedes aprobar socios directamente para tu sindicato. Los cargos de Directiva requieren autorización del SuperAdmin.'}
+                      : 'Como directiva puedes aprobar socios directamente. Los cargos de directiva requieren autorización del SuperAdmin.'}
                   </span>
                 </div>
 
-                {/* Tarjetas de postulaciones */}
+                {/* Tarjetas de postulantes */}
                 <div className="space-y-4">
                   {postulacionesFiltradas.length === 0 ? (
                     <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-10 text-center space-y-2">
                       <p className="text-base font-semibold text-white">No hay postulaciones en esta vista</p>
                       <p className="text-sm text-slate-400">
-                        Comparte el enlace de postulación con tus trabajadores o agrega una persona manualmente.
+                        Comparte el enlace de postulación o agrega un postulante manualmente.
                       </p>
                     </div>
                   ) : (
@@ -1231,7 +1335,7 @@ function AdminDashboardContent() {
                             tuvoError ? 'border-rose-500/60' : 'border-[#252e42]'
                           }`}
                         >
-                          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#20283a]">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex flex-wrap items-center gap-2.5">
                               <h3 className="text-lg font-bold text-white">{post.full_name}</h3>
                               <span
@@ -1241,7 +1345,7 @@ function AdminDashboardContent() {
                                     : 'bg-[#1c2334] text-slate-200 border-[#2d374e]'
                                 }`}
                               >
-                                {esDir ? 'Cargo: Directiva / Presidente' : 'Cargo: Socio'}
+                                {esDir ? 'Cargo: Directiva' : 'Cargo: Socio'}
                               </span>
                             </div>
 
@@ -1263,25 +1367,23 @@ function AdminDashboardContent() {
                                     : 'bg-rose-400'
                                 }`}
                               />
-                              {esAprobada ? 'Aprobada' : esPendiente ? 'Pendiente de revisión' : 'Rechazada'}
+                              {esAprobada ? 'Aprobada' : esPendiente ? 'Pendiente' : 'Rechazada'}
                             </span>
                           </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
                             <div className="bg-[#0e121b] border border-[#1f2637] rounded-xl p-3.5">
                               <p className="text-xs text-slate-400 mb-1">RUT del Postulante</p>
-                              <p className="font-mono font-bold text-white text-base">
-                                {formatRutLegible(post.rut)}
+                              <p className="font-mono font-bold text-white">
+                                {formatRutConPuntosYGuion(post.rut)}
                               </p>
                             </div>
-
                             <div className="bg-[#0e121b] border border-[#1f2637] rounded-xl p-3.5">
                               <p className="text-xs text-slate-400 mb-1">Correo Electrónico</p>
                               <p className="font-medium text-slate-100 break-all">
                                 {post.email || 'No informado'}
                               </p>
                             </div>
-
                             <div className="bg-[#0e121b] border border-[#1f2637] rounded-xl p-3.5">
                               <p className="text-xs text-slate-400 mb-1">Teléfono y Fecha</p>
                               <p className="font-mono text-slate-100">{post.telefono || 'Sin teléfono'}</p>
@@ -1304,12 +1406,12 @@ function AdminDashboardContent() {
                                     className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-[#08130e] font-bold text-sm transition-colors cursor-pointer disabled:opacity-50"
                                   >
                                     {procesandoId === post.id
-                                      ? 'Creando socio y enviando orden...'
+                                      ? 'Creando cuenta y enviando código...'
                                       : tuvoError
                                       ? 'Reintentar Aprobación'
                                       : esDir
-                                      ? 'Aprobar Directivo y Enviar Orden'
-                                      : 'Aprobar Socio y Enviar Orden'}
+                                      ? 'Aprobar Directivo y Enviar Código'
+                                      : 'Aprobar Socio y Enviar Código'}
                                   </button>
                                   <button
                                     type="button"
@@ -1323,40 +1425,42 @@ function AdminDashboardContent() {
                               ) : (
                                 <button
                                   type="button"
-                                  disabled={yaEscalado || procesandoId === post.id}
+                                  disabled={procesandoId === post.id || yaEscalado}
                                   onClick={() => handleEscalarASuperAdmin(post)}
-                                  className="px-4 py-2.5 rounded-xl bg-[#e5b32a]/15 hover:bg-[#e5b32a]/25 border border-[#e5b32a]/40 text-[#f3c64f] font-semibold text-sm cursor-pointer disabled:opacity-60"
+                                  className={`px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors cursor-pointer ${
+                                    yaEscalado
+                                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 cursor-default'
+                                      : 'bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] border-[#e5b32a]'
+                                  }`}
                                 >
                                   {yaEscalado
-                                    ? '✓ Solicitud enviada al SuperAdmin'
+                                    ? 'Solicitud enviada al SuperAdmin'
                                     : 'Solicitar autorización al SuperAdmin'}
                                 </button>
                               )
                             ) : (
-                              puedeAprobar && (
-                                <>
-                                  {esAprobada && (
-                                    <button
-                                      type="button"
-                                      disabled={procesandoId === post.id}
-                                      onClick={() => handleAprobarPostulacion(post)}
-                                      className="px-4 py-2 rounded-xl bg-[#e5b32a]/15 hover:bg-[#e5b32a]/25 border border-[#e5b32a]/40 text-[#f3c64f] font-semibold text-xs sm:text-sm transition-colors cursor-pointer disabled:opacity-50"
-                                    >
-                                      {procesandoId === post.id
-                                        ? 'Reemitiendo...'
-                                        : 'Reemitir Código y Reenviar Correo'}
-                                    </button>
-                                  )}
+                              <>
+                                {esAprobada && (
                                   <button
                                     type="button"
                                     disabled={procesandoId === post.id}
-                                    onClick={() => handleVolverAPendiente(post)}
-                                    className="px-4 py-2 rounded-xl bg-[#1c2334] hover:bg-[#263047] border border-[#2d374e] text-slate-200 font-medium text-xs sm:text-sm transition-colors cursor-pointer disabled:opacity-50"
+                                    onClick={() => handleAprobarPostulacion(post)}
+                                    className="px-4 py-2 rounded-xl bg-[#e5b32a]/15 hover:bg-[#e5b32a]/25 border border-[#e5b32a]/40 text-[#f3c64f] font-semibold text-xs sm:text-sm transition-colors cursor-pointer disabled:opacity-50"
                                   >
-                                    Volver a Pendiente
+                                    {procesandoId === post.id
+                                      ? 'Reemitiendo...'
+                                      : 'Reemitir Código y Reenviar Correo'}
                                   </button>
-                                </>
-                              )
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={procesandoId === post.id}
+                                  onClick={() => handleVolverAPendiente(post)}
+                                  className="px-4 py-2 rounded-xl bg-[#1c2334] hover:bg-[#263047] border border-[#2d374e] text-slate-200 font-medium text-xs sm:text-sm transition-colors cursor-pointer disabled:opacity-50"
+                                >
+                                  Volver a Pendiente
+                                </button>
+                              </>
                             )}
                           </div>
                         </article>
@@ -1367,145 +1471,223 @@ function AdminDashboardContent() {
               </div>
             )}
 
-            {/* ================= 2. RESUMEN ================= */}
+            {/* ==============================================================
+                TAB 2: RESUMEN, QUÓRUM (FIX MIGRACIÓN 001) Y TENDENCIAS (RECHARTS)
+               ============================================================== */}
             {activeTab === 'estadisticas' && (
               <div className="space-y-6">
-                <header>
-                  <h2 className="text-2xl font-bold text-white">Resumen del Sindicato</h2>
-                  <p className="text-sm text-slate-300 mt-1">
-                    Números clave de <strong>{sindicatoInfo?.nombre}</strong> en tiempo real.
-                  </p>
+                <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Resumen y Tendencias</h2>
+                    <p className="text-sm text-slate-300 mt-1">
+                      Indicadores clave, quórum por asamblea y evolución histórica de {sindicatoNombreActual}.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={exportarPadronCSV}
+                      className="px-3.5 py-2 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] text-xs font-bold cursor-pointer"
+                    >
+                      Exportar Padrón CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportarAsistenciaCSV}
+                      className="px-3.5 py-2 rounded-xl bg-[#161c2a] hover:bg-[#1e2638] border border-[#2c354b] text-slate-200 text-xs font-semibold cursor-pointer"
+                    >
+                      Asistencias CSV
+                    </button>
+                  </div>
                 </header>
 
+                {/* KPIs */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-5">
-                    <p className="text-xs text-slate-400">Socios en BD</p>
-                    <p className="text-3xl font-bold text-white mt-2">{socios.length}</p>
+                    <p className="text-xs font-medium text-slate-400">Socios registrados</p>
+                    <p className="text-3xl font-bold text-white mt-2 font-mono">{socios.length}</p>
                     <p className="text-xs text-slate-400 mt-1">
-                      {sindicatoInfo?.max_socios ? `Límite plan: ${sindicatoInfo.max_socios}` : 'Registrados en el padrón'}
+                      {socios.filter((s) => (s.estado || 'activo') === 'activo').length} activos en BD
                     </p>
                   </div>
                   <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-5">
-                    <p className="text-xs text-slate-400">Postulaciones pendientes</p>
-                    <p className="text-3xl font-bold text-[#e5b32a] mt-2">{postPendientes.length}</p>
-                    <p className="text-xs text-slate-400 mt-1">Esperando tu revisión</p>
+                    <p className="text-xs font-medium text-slate-400">Postulaciones pendientes</p>
+                    <p className="text-3xl font-bold text-[#e5b32a] mt-2 font-mono">{postPendientes.length}</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {postAprobadas.length} aprobadas en total
+                    </p>
                   </div>
                   <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-5">
-                    <p className="text-xs text-slate-400">Asambleas creadas</p>
-                    <p className="text-3xl font-bold text-sky-300 mt-2">{historialAsambleas.length}</p>
-                    <p className="text-xs text-slate-400 mt-1">Sesiones registradas</p>
+                    <p className="text-xs font-medium text-slate-400">Quórum promedio</p>
+                    <p className="text-3xl font-bold text-emerald-400 mt-2 font-mono">{quorumPromedioPct}%</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      En {historialAsambleas.length} asambleas · {sociosEnSala} en sala
+                    </p>
                   </div>
                   <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-5">
-                    <p className="text-xs text-slate-400">Asistencias marcadas</p>
-                    <p className="text-3xl font-bold text-emerald-400 mt-2">{asistencias.length}</p>
-                    <p className="text-xs text-slate-400 mt-1">Escaneos registrados</p>
+                    <p className="text-xs font-medium text-slate-400">Secciones activas</p>
+                    <p className="text-3xl font-bold text-sky-300 mt-2 font-mono">
+                      {modulosEncendidosCount}/{totalModulosCount}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {comunicados.length} avisos publicados
+                    </p>
                   </div>
                 </div>
 
-                <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-6 space-y-4">
-                  <h3 className="text-base font-bold text-white">Estado de Postulaciones</h3>
-                  {[
-                    { label: 'Pendientes por revisar', val: postPendientes.length, color: 'bg-[#e5b32a]' },
-                    { label: 'Aprobadas', val: postAprobadas.length, color: 'bg-emerald-400' },
-                    { label: 'Rechazadas', val: postRechazadas.length, color: 'bg-rose-400' },
-                  ].map((item) => {
-                    const total = postulaciones.length || 1;
-                    const pct = Math.round((item.val / total) * 100);
-                    return (
-                      <div key={item.label} className="space-y-1.5">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-slate-200">{item.label}</span>
-                          <span className="font-mono text-slate-300">
-                            {item.val} ({pct}%)
-                          </span>
-                        </div>
-                        <div className="w-full h-2.5 bg-[#1e2536] rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${item.color}`} style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
+                {/* Quórum por Asamblea (con fix de asamblea_id de migración 001) */}
+                <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-6 space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#1f2637]">
+                    <div>
+                      <h3 className="text-base font-semibold text-white">Quórum y Participación por Asamblea</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Asistencias QR vinculadas a cada sesión de {sindicatoNombreActual}.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('asambleas')}
+                      className="text-xs font-semibold text-[#e5b32a] hover:underline cursor-pointer"
+                    >
+                      Gestionar sesiones →
+                    </button>
+                  </div>
+
+                  {historialAsambleas.length === 0 ? (
+                    <p className="text-sm text-slate-400 py-4 text-center">
+                      Aún no se han creado sesiones de asamblea en este sindicato.
+                    </p>
+                  ) : (
+                    <div className="space-y-3.5">
+                      {historialAsambleas.slice(0, 6).map((asam) => {
+                        const asistentesSesion = asistencias.filter((a) => perteneceAAsamblea(a, asam));
+                        const enSala = asistentesSesion.filter((a) => !a.hora_salida).length;
+                        const pctQuorum =
+                          socios.length > 0
+                            ? Math.min(Math.round((asistentesSesion.length / socios.length) * 100), 100)
+                            : asistentesSesion.length > 0
+                            ? 100
+                            : 0;
+
+                        return (
+                          <div
+                            key={asam.id}
+                            className="p-4 rounded-xl bg-[#0e121b] border border-[#1f2637] space-y-2"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <div className="min-w-0">
+                                <span className="font-semibold text-white">{asam.titulo}</span>
+                                <span className="font-mono text-slate-400 ml-2">
+                                  ({new Date(asam.created_at).toLocaleDateString('es-CL')})
+                                </span>
+                              </div>
+                              <span className="font-mono font-bold text-emerald-400 shrink-0">
+                                {asistentesSesion.length} / {socios.length || 1} socios ({pctQuorum}%)
+                              </span>
+                            </div>
+
+                            <div className="w-full h-2.5 bg-[#1b2233] rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-emerald-400 rounded-full transition-all duration-500"
+                                style={{ width: `${Math.max(pctQuorum, asistentesSesion.length > 0 ? 5 : 0)}%` }}
+                              />
+                            </div>
+
+                            {enSala > 0 && (
+                              <p className="text-[11px] font-mono text-[#e5b32a]">
+                                {enSala} socio(s) actualmente en sala
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
+
+                {/* TENDENCIAS MES A MES (Recharts — rama antonino-dev) */}
+                <TendenciasSindicato sindicatoId={idSindicatoActual} />
               </div>
             )}
 
-            {/* ================= 3. ASAMBLEAS ================= */}
+            {/* ==============================================================
+                TAB 3: ASAMBLEAS Y CONTROL QR (CON FIX DE ASAMBLEA_ID)
+               ============================================================== */}
             {activeTab === 'asambleas' && (
               <div className="space-y-6">
                 <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h2 className="text-2xl font-bold text-white">Asambleas y Asistencia</h2>
+                    <h2 className="text-2xl font-bold text-white">Asambleas y Control QR</h2>
                     <p className="text-sm text-slate-300 mt-1">
-                      Crea una sesión oficial y revisa en vivo quién entró y quién salió.
+                      Crea sesiones oficiales y revisa el registro de entrada y salida de tus socios.
                     </p>
                   </div>
-                  <Link
-                    href="/dashboard/asistencia"
-                    className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-[#08130e] text-sm font-bold text-center shrink-0"
-                  >
-                    Abrir Escáner QR →
-                  </Link>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href="/dashboard/asistencia"
+                      className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-[#08130e] text-xs font-bold"
+                    >
+                      Abrir Escáner QR
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={exportarAsistenciaCSV}
+                      className="px-4 py-2.5 rounded-xl bg-[#161c2a] hover:bg-[#1e2638] border border-[#2c354b] text-slate-200 text-xs font-semibold cursor-pointer"
+                    >
+                      Descargar CSV
+                    </button>
+                  </div>
                 </header>
 
                 <form
                   onSubmit={handleCrearAsamblea}
-                  className="bg-[#121722] border border-[#252e42] rounded-2xl p-5 space-y-3"
+                  className="bg-[#121722] border border-[#252e42] rounded-2xl p-5 flex flex-col sm:flex-row gap-3"
                 >
-                  <label className="block text-sm font-semibold text-white">
-                    Iniciar nueva sesión de asamblea
-                  </label>
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <input
-                      type="text"
-                      required
-                      value={tituloNuevaAsamblea}
-                      onChange={(e) => setTituloNuevaAsamblea(e.target.value)}
-                      placeholder="Ej: Asamblea Ordinaria de Noviembre 2026"
-                      className="flex-1 bg-[#0b0e14] border border-[#2c354b] rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-[#e5b32a]"
-                    />
-                    <button
-                      type="submit"
-                      disabled={creandoAsamblea}
-                      className="px-5 py-2.5 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] font-bold text-sm cursor-pointer disabled:opacity-50"
-                    >
-                      {creandoAsamblea ? 'Creando...' : 'Crear Sesión'}
-                    </button>
-                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={tituloNuevaAsamblea}
+                    onChange={(e) => setTituloNuevaAsamblea(e.target.value)}
+                    placeholder="Nombre de la nueva sesión (ej: Asamblea Ordinaria Noviembre)..."
+                    className="flex-1 bg-[#0b0e14] border border-[#2c354b] rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-[#e5b32a]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={creandoAsamblea}
+                    className="px-5 py-2.5 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] text-sm font-bold cursor-pointer disabled:opacity-50 shrink-0"
+                  >
+                    {creandoAsamblea ? 'Creando...' : '+ Crear Sesión'}
+                  </button>
                 </form>
 
                 <div className="space-y-4">
                   {historialAsambleas.length === 0 ? (
                     <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-10 text-center text-sm text-slate-400">
-                      Aún no hay asambleas creadas para este sindicato.
+                      No existen sesiones creadas todavía.
                     </div>
                   ) : (
                     historialAsambleas.map((asam) => {
-                      const asistentes = asistencias.filter(
-                        (a) =>
-                          String(a.asamblea_titulo || '').trim().toLowerCase() ===
-                          String(asam.titulo || '').trim().toLowerCase()
-                      );
-
+                      const asistentes = asistencias.filter((a) => perteneceAAsamblea(a, asam));
                       return (
-                        <div
+                        <article
                           key={asam.id}
-                          className="bg-[#121722] border border-[#252e42] rounded-2xl p-5 sm:p-6 space-y-4"
+                          className="bg-[#121722] border border-[#252e42] rounded-2xl p-5 space-y-4"
                         >
-                          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#20283a]">
+                          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#1f2637]">
                             <div>
-                              <h3 className="text-base font-bold text-white">{asam.titulo}</h3>
-                              <p className="text-xs text-slate-400 mt-0.5">
-                                Creada el {new Date(asam.created_at).toLocaleDateString('es-CL')}
-                              </p>
+                              <span className="text-xs font-mono text-[#e5b32a]">
+                                {new Date(asam.created_at).toLocaleDateString('es-CL')}
+                              </span>
+                              <h3 className="text-base font-bold text-white mt-0.5">{asam.titulo}</h3>
                             </div>
                             <div className="flex items-center gap-2.5">
-                              <span className="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-xs font-semibold">
+                              <span className="px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 text-xs font-mono font-semibold">
                                 {asistentes.length} asistente(s)
                               </span>
                               <button
                                 type="button"
                                 onClick={() => setAsambleaAEliminar(asam)}
-                                className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
+                                className="px-3 py-1.5 rounded-lg text-xs font-medium text-rose-300 hover:bg-rose-500/15 border border-rose-500/30 cursor-pointer"
                               >
                                 Eliminar
                               </button>
@@ -1514,7 +1696,7 @@ function AdminDashboardContent() {
 
                           {asistentes.length === 0 ? (
                             <p className="text-xs text-slate-400">
-                              Todavía no se registran socios escaneados en esta sesión.
+                              Aún no se han escaneado asistencias para esta sesión.
                             </p>
                           ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1535,43 +1717,31 @@ function AdminDashboardContent() {
                                 return (
                                   <div
                                     key={asist.id}
-                                    className="p-4 rounded-xl bg-[#0e121b] border border-[#1f2637] space-y-2 text-xs"
+                                    className="p-3.5 rounded-xl bg-[#0e121b] border border-[#1f2637] space-y-1.5 text-xs"
                                   >
                                     <div className="flex items-center justify-between gap-2">
-                                      <span className="font-bold text-white truncate text-sm">
+                                      <span className="font-semibold text-white truncate">
                                         {asist.usuario_nombre || 'Socio'}
                                       </span>
-                                      <span className="px-2 py-0.5 rounded bg-[#1c2334] text-slate-300 font-mono text-[10px]">
+                                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#1b2233] text-slate-300">
                                         {asist.metodo_registro || 'QR'}
                                       </span>
                                     </div>
                                     <p className="font-mono text-slate-400">
-                                      {formatRutLegible(asist.usuario_rut)}
+                                      {formatRutConPuntosYGuion(asist.usuario_rut)}
                                     </p>
-                                    <div className="pt-2 border-t border-[#1f2637] space-y-1.5">
-                                      <div className="flex justify-between">
-                                        <span className="text-slate-400">Entrada:</span>
-                                        <span className="font-mono font-semibold text-emerald-300">
-                                          {horaEntrada} hrs
-                                        </span>
-                                      </div>
-                                      <div className="flex justify-between">
-                                        <span className="text-slate-400">Salida:</span>
-                                        {horaSalida ? (
-                                          <span className="font-mono font-semibold text-sky-300">
-                                            {horaSalida} hrs
-                                          </span>
-                                        ) : (
-                                          <span className="font-semibold text-amber-300">En sala</span>
-                                        )}
-                                      </div>
+                                    <div className="flex justify-between pt-2 border-t border-[#1c2334] font-mono text-[11px]">
+                                      <span className="text-emerald-400">Entrada: {horaEntrada}</span>
+                                      <span className={horaSalida ? 'text-sky-300' : 'text-[#e5b32a]'}>
+                                        {horaSalida ? `Salida: ${horaSalida}` : 'En sala'}
+                                      </span>
                                     </div>
                                   </div>
                                 );
                               })}
                             </div>
                           )}
-                        </div>
+                        </article>
                       );
                     })
                   )}
@@ -1579,13 +1749,15 @@ function AdminDashboardContent() {
               </div>
             )}
 
-            {/* ================= 4. ENVIAR AVISOS ================= */}
+            {/* ==============================================================
+                TAB 4: ENVIAR AVISOS A LOS SOCIOS
+               ============================================================== */}
             {activeTab === 'notificaciones' && (
               <div className="space-y-6">
                 <header>
                   <h2 className="text-2xl font-bold text-white">Enviar Avisos a los Socios</h2>
                   <p className="text-sm text-slate-300 mt-1">
-                    Los mensajes aparecen de inmediato en la campanita de notificaciones de tus socios.
+                    Publica comunicados oficiales o alertas individuales para {sindicatoNombreActual}.
                   </p>
                 </header>
 
@@ -1595,17 +1767,17 @@ function AdminDashboardContent() {
                 >
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      ¿Para quién es el aviso?
+                      Destinatario
                     </label>
                     <select
                       value={notifDestino}
                       onChange={(e) => setNotifDestino(e.target.value)}
-                      className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-4 py-2.5 text-white"
+                      className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#e5b32a]"
                     >
-                      <option value="todos">Todos los socios de {sindicatoInfo?.nombre}</option>
-                      {socios.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          Solo para: {s.full_name || s.email} ({formatRutLegible(s.rut)})
+                      <option value="todos">Todos los socios del sindicato ({socios.length})</option>
+                      {socios.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.full_name || u.email} ({formatRutConPuntosYGuion(u.rut)})
                         </option>
                       ))}
                     </select>
@@ -1619,8 +1791,8 @@ function AdminDashboardContent() {
                       required
                       value={notifTitulo}
                       onChange={(e) => setNotifTitulo(e.target.value)}
-                      placeholder="Ej: Citación a Asamblea General este viernes"
-                      className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-4 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:border-[#e5b32a]"
+                      placeholder="Ej: Citación a Asamblea General este viernes..."
+                      className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#e5b32a]"
                     />
                   </div>
 
@@ -1633,30 +1805,29 @@ function AdminDashboardContent() {
                       rows={4}
                       value={notifMensaje}
                       onChange={(e) => setNotifMensaje(e.target.value)}
-                      placeholder="Escribe los detalles claros (lugar, fecha, hora)..."
-                      className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-4 py-2.5 text-white placeholder-slate-400 focus:outline-none focus:border-[#e5b32a]"
+                      placeholder="Escribe el comunicado que recibirán los socios..."
+                      className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#e5b32a]"
                     />
                   </div>
 
-                  <button
-                    type="submit"
-                    disabled={enviandoNotif}
-                    className="px-6 py-3 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] font-bold text-sm cursor-pointer disabled:opacity-50"
-                  >
-                    {enviandoNotif ? 'Enviando aviso...' : 'Enviar Aviso Ahora'}
-                  </button>
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={enviandoNotif}
+                      className="px-5 py-2.5 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] font-bold text-sm cursor-pointer disabled:opacity-50"
+                    >
+                      {enviandoNotif ? 'Enviando aviso...' : 'Enviar Aviso'}
+                    </button>
+                  </div>
                 </form>
 
                 {comunicados.length > 0 && (
                   <div className="space-y-3">
-                    <h3 className="text-sm font-semibold text-slate-300">Avisos enviados recientemente</h3>
-                    <div className="space-y-2.5">
+                    <h3 className="text-sm font-semibold text-slate-300">Últimos comunicados publicados</h3>
+                    <div className="bg-[#121722] border border-[#252e42] rounded-2xl divide-y divide-[#1f2637]">
                       {comunicados.map((c) => (
-                        <div
-                          key={c.id}
-                          className="bg-[#121722] border border-[#252e42] rounded-xl p-4 space-y-1"
-                        >
-                          <p className="text-sm font-bold text-white">{c.titulo}</p>
+                        <div key={c.id} className="p-4 space-y-1">
+                          <p className="text-sm font-semibold text-white">{c.titulo}</p>
                           <p className="text-xs text-slate-300 leading-relaxed">{c.contenido}</p>
                         </div>
                       ))}
@@ -1666,131 +1837,164 @@ function AdminDashboardContent() {
               </div>
             )}
 
-            {/* ================= 5. LISTA DE SOCIOS ================= */}
+            {/* ==============================================================
+                TAB 5: LISTA DE SOCIOS
+               ============================================================== */}
             {activeTab === 'socios' && (
               <div className="space-y-6">
                 <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h2 className="text-2xl font-bold text-white">Lista de Socios ({sociosFiltrados.length})</h2>
+                    <h2 className="text-2xl font-bold text-white">
+                      Lista de Socios ({sociosFiltrados.length})
+                    </h2>
                     <p className="text-sm text-slate-300 mt-1">
-                      Todas las cuentas registradas en la base de datos de <strong>{sindicatoInfo?.nombre}</strong>.
+                      Nómina de personas registradas en {sindicatoNombreActual}.
                     </p>
                   </div>
-                  <input
-                    type="text"
-                    value={busquedaSocio}
-                    onChange={(e) => setBusquedaSocio(e.target.value)}
-                    placeholder="Buscar socio por nombre, RUT o correo..."
-                    className="w-full sm:w-80 bg-[#121722] border border-[#2c354b] rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-[#e5b32a]"
-                  />
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      type="text"
+                      value={busquedaSocio}
+                      onChange={(e) => setBusquedaSocio(e.target.value)}
+                      placeholder="Buscar por nombre, RUT o correo..."
+                      className="w-full sm:w-64 bg-[#121722] border border-[#2c354b] rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-[#e5b32a]"
+                    />
+                    <button
+                      type="button"
+                      onClick={exportarPadronCSV}
+                      className="px-3.5 py-2 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] text-xs font-bold cursor-pointer"
+                    >
+                      CSV
+                    </button>
+                  </div>
                 </header>
 
                 <div className="space-y-2.5">
-                  {sociosFiltrados.length === 0 ? (
-                    <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-8 text-center text-sm text-slate-400">
-                      No se encontraron socios con ese criterio.
-                    </div>
-                  ) : (
-                    sociosFiltrados.map((u) => {
-                      const esSA = String(u.role || '').toLowerCase() === 'superadmin';
-                      const estLower = String(u.estado || 'activo').toLowerCase();
-                      const suspendido = estLower === 'suspendido';
-                      const faltaCorreo = estLower === 'pendiente_correo' || u.email_verificado === false;
-                      return (
-                        <div
-                          key={u.id}
-                          className="bg-[#121722] border border-[#252e42] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                        >
-                          <div className="space-y-1 min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-base font-semibold text-white">
-                                {u.full_name || 'Sin nombre'}
-                              </span>
-                              <span className="text-xs font-mono uppercase px-2 py-0.5 rounded bg-[#1c2334] text-[#e5b32a]">
-                                {u.role || 'socio'}
-                              </span>
-                              <span
-                                className={`text-xs px-2 py-0.5 rounded ${
-                                  suspendido
-                                    ? 'bg-rose-500/15 text-rose-300'
-                                    : faltaCorreo
-                                    ? 'bg-amber-500/15 text-amber-300'
-                                    : 'bg-emerald-500/15 text-emerald-300'
-                                }`}
-                              >
-                                {suspendido
-                                  ? 'Suspendido'
+                  {sociosFiltrados.map((u) => {
+                    const estLower = String(u.estado || 'activo').toLowerCase();
+                    const faltaCorreo = estLower === 'pendiente_correo' || u.email_verificado === false;
+                    return (
+                      <div
+                        key={u.id}
+                        className="bg-[#121722] border border-[#252e42] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold text-white">
+                              {u.full_name || 'Sin nombre'}
+                            </span>
+                            <span className="text-xs font-mono uppercase px-2 py-0.5 rounded bg-[#1c2334] text-[#e5b32a]">
+                              {u.role || 'socio'}
+                            </span>
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded ${
+                                estLower === 'suspendido'
+                                  ? 'bg-rose-500/15 text-rose-300'
                                   : faltaCorreo
-                                  ? 'Falta validar correo'
-                                  : 'Activo'}
-                              </span>
-                            </div>
-                            <p className="text-xs font-mono text-slate-300 break-all">
-                              RUT {formatRutLegible(u.rut)} · {u.email}
-                            </p>
-                          </div>
-
-                          {!esSA && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSocioEdit(u);
-                                setFormSocioEdit({
-                                  role: u.role || 'socio',
-                                  estado: u.estado || 'activo',
-                                });
-                              }}
-                              className="px-4 py-2 rounded-lg bg-[#1c2334] hover:bg-[#263047] text-white text-xs font-semibold cursor-pointer self-start sm:self-center shrink-0"
+                                  ? 'bg-amber-500/15 text-amber-300'
+                                  : 'bg-emerald-500/15 text-emerald-300'
+                              }`}
                             >
-                              Gestionar
-                            </button>
-                          )}
+                              {estLower === 'suspendido'
+                                ? 'Suspendido'
+                                : faltaCorreo
+                                ? 'Falta validar correo'
+                                : 'Activo'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300 font-mono break-all">
+                            {u.email} • RUT {formatRutConPuntosYGuion(u.rut)}
+                          </p>
                         </div>
-                      );
-                    })
-                  )}
+
+                        {String(u.role || '').toLowerCase() !== 'superadmin' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSocioEdit(u);
+                              setFormSocioEdit({
+                                role: u.role || 'socio',
+                                estado: u.estado || 'activo',
+                              });
+                            }}
+                            className="px-3.5 py-2 rounded-lg bg-[#1c2334] hover:bg-[#263047] text-white text-xs font-semibold cursor-pointer self-start sm:self-center shrink-0"
+                          >
+                            Editar estado
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
-            {/* ================= 6. SECCIONES VISIBLES ================= */}
+            {/* ==============================================================
+                TAB 6: SECCIONES VISIBLES (SOFT DELETE)
+               ============================================================== */}
             {activeTab === 'modulos' && (
               <div className="space-y-6">
-                <header>
-                  <h2 className="text-2xl font-bold text-white">Secciones Visibles para Socios</h2>
-                  <p className="text-sm text-slate-300 mt-1">
-                    Enciende o apaga las herramientas que quieres mostrar en el portal de tus socios.
-                  </p>
+                <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Secciones Visibles</h2>
+                    <p className="text-sm text-slate-300 mt-1">
+                      Activa u oculta en vivo los módulos que ven los socios de {sindicatoNombreActual}.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={guardandoModulo !== null}
+                      onClick={() => handleCambiarTodosModulos(true)}
+                      className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 text-xs font-semibold cursor-pointer disabled:opacity-50"
+                    >
+                      Activar todas
+                    </button>
+                    <button
+                      type="button"
+                      disabled={guardandoModulo !== null}
+                      onClick={() => handleCambiarTodosModulos(false)}
+                      className="px-3.5 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/35 text-rose-300 text-xs font-semibold cursor-pointer disabled:opacity-50"
+                    >
+                      Ocultar todas
+                    </button>
+                  </div>
                 </header>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   {Object.entries(MODULOS_BASE).map(([key, info]) => {
-                    const encendido = Boolean(modulosActivos[key]);
+                    const activo = Boolean(modulosActivos[key]);
                     return (
                       <div
                         key={key}
-                        className="bg-[#121722] border border-[#252e42] rounded-2xl p-5 flex items-center justify-between gap-4"
+                        className={`p-4 rounded-2xl border flex items-center justify-between gap-3 transition-colors ${
+                          activo
+                            ? 'bg-[#121722] border-[#2b364f]'
+                            : 'bg-[#0e121b] border-[#1f2637] opacity-65'
+                        }`}
                       >
                         <div>
-                          <h3 className="text-sm font-bold text-white">{info.label}</h3>
-                          <p className="text-xs text-slate-400 mt-0.5">{info.desc}</p>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                activo ? 'bg-emerald-400' : 'bg-rose-400'
+                              }`}
+                            />
+                            <h3 className="text-sm font-semibold text-white">{info.label}</h3>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">{info.desc}</p>
                         </div>
-
                         <button
                           type="button"
-                          disabled={guardandoModulo === key}
+                          disabled={guardandoModulo !== null}
                           onClick={() => handleToggleModulo(key)}
-                          className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-colors cursor-pointer shrink-0 ${
-                            encendido
-                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                              : 'bg-[#1a2030] border-[#2c354b] text-slate-400'
+                          className={`px-3.5 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer shrink-0 ${
+                            activo
+                              ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/35'
+                              : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/35'
                           }`}
                         >
-                          {guardandoModulo === key
-                            ? 'Guardando...'
-                            : encendido
-                            ? 'Visible'
-                            : 'Oculto'}
+                          {guardandoModulo === key ? '...' : activo ? 'Ocultar' : 'Activar'}
                         </button>
                       </div>
                     );
@@ -1799,94 +2003,108 @@ function AdminDashboardContent() {
               </div>
             )}
 
-            {/* ================= 7. APARIENCIA ================= */}
+            {/* ==============================================================
+                TAB 7: APARIENCIA DEL PORTAL (JSONB)
+               ============================================================== */}
             {activeTab === 'tema' && (
               <div className="space-y-6">
                 <header>
                   <h2 className="text-2xl font-bold text-white">Apariencia del Portal</h2>
                   <p className="text-sm text-slate-300 mt-1">
-                    Elige una combinación de colores o ajusta el mensaje de bienvenida que ven tus socios.
+                    Personaliza los colores y el mensaje principal que ven los socios al iniciar sesión.
                   </p>
                 </header>
 
-                <form onSubmit={handleGuardarTema} className="space-y-6">
-                  <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-6 space-y-4">
-                    <p className="text-sm font-bold text-white">Combinaciones recomendadas (1 clic)</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      {PALETAS_PRESET.map((pal) => (
-                        <button
-                          key={pal.nombre}
-                          type="button"
-                          onClick={() =>
-                            setConfigTema((prev) => ({
-                              ...prev,
-                              tema: {
-                                fondo_base: pal.fondo_base,
-                                color_tarjetas: pal.color_tarjetas,
-                                color_acento: pal.color_acento,
-                                color_borde: pal.color_borde,
-                              },
-                            }))
-                          }
-                          className="p-3.5 rounded-xl bg-[#0b0e14] border border-[#252e42] hover:border-[#e5b32a] text-left space-y-2.5 cursor-pointer"
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-5 h-5 rounded-md border border-white/15" style={{ background: pal.fondo_base }} />
-                            <span className="w-5 h-5 rounded-md border border-white/15" style={{ background: pal.color_tarjetas }} />
-                            <span className="w-5 h-5 rounded-md border border-white/15" style={{ background: pal.color_acento }} />
+                <form
+                  onSubmit={handleGuardarTema}
+                  className="bg-[#121722] border border-[#252e42] rounded-2xl p-6 space-y-6 text-sm"
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#e5b32a]">
+                        Paleta de colores
+                      </h3>
+                      {(
+                        [
+                          { key: 'fondo_base', label: 'Fondo principal' },
+                          { key: 'color_tarjetas', label: 'Tarjetas y bloques' },
+                          { key: 'color_acento', label: 'Color de acento' },
+                          { key: 'color_borde', label: 'Bordes sutiles' },
+                        ] as const
+                      ).map((c) => (
+                        <div key={c.key} className="flex items-center justify-between gap-3">
+                          <span className="text-slate-300">{c.label}</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={configTema.tema[c.key]}
+                              onChange={(e) =>
+                                setConfigTema({
+                                  ...configTema,
+                                  tema: { ...configTema.tema, [c.key]: e.target.value },
+                                })
+                              }
+                              className="w-9 h-9 rounded-lg bg-transparent border border-[#2c354b] cursor-pointer"
+                            />
+                            <span className="font-mono text-xs text-slate-400 w-16">
+                              {configTema.tema[c.key]}
+                            </span>
                           </div>
-                          <p className="text-xs font-semibold text-white">{pal.nombre}</p>
-                        </button>
+                        </div>
                       ))}
+                    </div>
+
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#e5b32a]">
+                        Bienvenida del portal
+                      </h3>
+                      <div>
+                        <label className="block text-xs text-slate-300 mb-1.5">Título principal</label>
+                        <input
+                          value={configTema.hero.titulo}
+                          onChange={(e) =>
+                            setConfigTema({
+                              ...configTema,
+                              hero: { ...configTema.hero, titulo: e.target.value },
+                            })
+                          }
+                          className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-300 mb-1.5">Subtítulo</label>
+                        <textarea
+                          rows={3}
+                          value={configTema.hero.subtitulo}
+                          onChange={(e) =>
+                            setConfigTema({
+                              ...configTema,
+                              hero: { ...configTema.hero, subtitulo: e.target.value },
+                            })
+                          }
+                          className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white"
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-6 space-y-4 text-sm">
-                    <p className="font-bold text-white">Mensaje de bienvenida del portal</p>
-                    <div>
-                      <label className="block text-xs text-slate-300 mb-1.5">Título principal</label>
-                      <input
-                        value={configTema.hero.titulo}
-                        onChange={(e) =>
-                          setConfigTema((prev) => ({
-                            ...prev,
-                            hero: { ...prev.hero, titulo: e.target.value },
-                          }))
-                        }
-                        className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-4 py-2.5 text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-300 mb-1.5">Descripción breve</label>
-                      <textarea
-                        rows={2}
-                        value={configTema.hero.subtitulo}
-                        onChange={(e) =>
-                          setConfigTema((prev) => ({
-                            ...prev,
-                            hero: { ...prev.hero, subtitulo: e.target.value },
-                          }))
-                        }
-                        className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-4 py-2.5 text-white"
-                      />
-                    </div>
-
+                  <div className="flex justify-end pt-2 border-t border-[#1f2637]">
                     <button
                       type="submit"
                       disabled={guardandoTema}
-                      className="px-6 py-3 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] font-bold text-sm cursor-pointer disabled:opacity-50"
+                      className="px-5 py-2.5 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] font-bold text-sm cursor-pointer disabled:opacity-50"
                     >
-                      {guardandoTema ? 'Guardando cambios...' : 'Publicar Apariencia'}
+                      {guardandoTema ? 'Guardando cambios...' : 'Guardar y aplicar en vivo'}
                     </button>
                   </div>
                 </form>
               </div>
             )}
           </div>
-        </section>
+        </main>
       </div>
 
-      {/* ================= MODAL 1: ORDEN DE INCORPORACIÓN + CÓDIGO MÓVIL ================= */}
+      {/* ================= MODAL 1: ORDEN DE INCORPORACIÓN EMITIDA ================= */}
       {credSocioAprobado && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto"
@@ -1917,7 +2135,9 @@ function AdminDashboardContent() {
                   {credSocioAprobado.codigoCorreo}
                 </strong>
               </p>
-              <p className="text-xs text-sky-300 break-all pt-1">{credSocioAprobado.linkValidacion}</p>
+              <p className="text-xs text-sky-300 break-all pt-1">
+                {credSocioAprobado.linkValidacion}
+              </p>
             </div>
 
             <div className="p-4 rounded-xl bg-[#0b0e14] border border-[#252e42] space-y-1.5 text-sm font-mono">
@@ -1925,7 +2145,10 @@ function AdminDashboardContent() {
                 2. Credenciales de acceso
               </p>
               <p className="text-slate-300">
-                RUT: <strong className="text-white">{formatRutLegible(credSocioAprobado.rut)}</strong>
+                RUT:{' '}
+                <strong className="text-white">
+                  {formatRutConPuntosYGuion(credSocioAprobado.rut)}
+                </strong>
               </p>
               <p className="text-slate-300 break-all">
                 Correo: <strong className="text-white">{credSocioAprobado.email}</strong>
@@ -1941,14 +2164,17 @@ function AdminDashboardContent() {
                 type="button"
                 onClick={async () => {
                   const texto =
-                    `¡Hola ${credSocioAprobado.fullName}! Tu ingreso a ${sindicatoInfo?.nombre || 'Sindicato PYC'} fue aprobado (Orden ${credSocioAprobado.ordenSocio}).\n\n` +
+                    `¡Hola ${credSocioAprobado.fullName}! Tu ingreso a ${sindicatoNombreActual} fue aprobado (Orden ${credSocioAprobado.ordenSocio}).\n\n` +
                     `1. Valida tu correo aquí: ${credSocioAprobado.linkValidacion}\n` +
                     `Código de verificación: ${credSocioAprobado.codigoCorreo}\n\n` +
                     `2. Luego ingresa con:\n` +
-                    `RUT: ${formatRutLegible(credSocioAprobado.rut)}\n` +
+                    `RUT: ${formatRutConPuntosYGuion(credSocioAprobado.rut)}\n` +
                     `Clave temporal: ${credSocioAprobado.password}`;
                   const ok = await copiarTextoSeguro(texto);
-                  notificar(ok ? 'Mensaje completo copiado para WhatsApp.' : 'No se pudo copiar.', ok ? 'ok' : 'err');
+                  notificar(
+                    ok ? 'Mensaje completo copiado para WhatsApp.' : 'No se pudo copiar.',
+                    ok ? 'ok' : 'err'
+                  );
                 }}
                 className="px-4 py-2.5 rounded-xl bg-[#1c2334] hover:bg-[#263047] text-white text-sm font-medium cursor-pointer"
               >
@@ -1989,14 +2215,17 @@ function AdminDashboardContent() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-slate-300 mb-1">RUT (sin puntos)</label>
+                  <label className="block text-xs text-slate-300 mb-1">RUT</label>
                   <input
                     required
-                    maxLength={10}
-                    placeholder="20386773-2"
+                    maxLength={12}
+                    placeholder="15.432.198-5"
                     value={formNuevoPost.rut}
                     onChange={(e) =>
-                      setFormNuevoPost({ ...formNuevoPost, rut: formatRutInputSinPuntos(e.target.value) })
+                      setFormNuevoPost({
+                        ...formNuevoPost,
+                        rut: formatRutConPuntosYGuion(e.target.value),
+                      })
                     }
                     className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white font-mono"
                   />
@@ -2025,7 +2254,9 @@ function AdminDashboardContent() {
                 <label className="block text-xs text-slate-300 mb-1">Rol solicitado</label>
                 <select
                   value={formNuevoPost.rol_solicitado}
-                  onChange={(e) => setFormNuevoPost({ ...formNuevoPost, rol_solicitado: e.target.value })}
+                  onChange={(e) =>
+                    setFormNuevoPost({ ...formNuevoPost, rol_solicitado: e.target.value })
+                  }
                   className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white"
                 >
                   <option value="socio">Socio Trabajador</option>
@@ -2052,7 +2283,7 @@ function AdminDashboardContent() {
         </div>
       )}
 
-      {/* ================= MODAL 3: CONFIRMAR RECHAZO ================= */}
+      {/* ================= MODAL 3: CONFIRMAR RECHAZO POSTULACIÓN ================= */}
       {postARechazar && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
@@ -2065,7 +2296,7 @@ function AdminDashboardContent() {
             <h3 className="text-lg font-bold text-white">¿Rechazar postulación?</h3>
             <p className="text-sm text-slate-300">
               Se marcará como rechazada la solicitud de <strong>{postARechazar.full_name}</strong> (RUT{' '}
-              {formatRutLegible(postARechazar.rut)}).
+              {formatRutConPuntosYGuion(postARechazar.rut)}).
             </p>
             <div className="flex justify-end gap-2">
               <button
@@ -2087,19 +2318,19 @@ function AdminDashboardContent() {
         </div>
       )}
 
-      {/* ================= MODAL 4: CONFIRMAR ELIMINAR ASAMBLEA ================= */}
+      {/* ================= MODAL 4: ELIMINAR ASAMBLEA ================= */}
       {asambleaAEliminar && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
           onClick={() => setAsambleaAEliminar(null)}
         >
           <div
-            className="bg-[#121722] border border-[#2f3952] rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl"
+            className="bg-[#121722] border border-rose-500/40 rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-bold text-white">¿Eliminar asamblea?</h3>
+            <h3 className="text-lg font-bold text-white">¿Eliminar sesión?</h3>
             <p className="text-sm text-slate-300">
-              Se eliminará la sesión <strong>{asambleaAEliminar.titulo}</strong> del historial.
+              Se eliminará <strong>{asambleaAEliminar.titulo}</strong> junto a sus registros de asistencia QR.
             </p>
             <div className="flex justify-end gap-2">
               <button
@@ -2121,33 +2352,33 @@ function AdminDashboardContent() {
         </div>
       )}
 
-      {/* ================= MODAL 5: GESTIONAR SOCIO ================= */}
+      {/* ================= MODAL 5: EDITAR ESTADO DE SOCIO ================= */}
       {socioEdit && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
           onClick={() => setSocioEdit(null)}
         >
           <div
-            className="bg-[#121722] border border-[#2f3952] rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl"
+            className="bg-[#121722] border border-[#2f3952] rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-bold text-white">
-              Gestionar a {socioEdit.full_name || socioEdit.email}
+              Editar a {socioEdit.full_name || socioEdit.email}
             </h3>
             <form onSubmit={handleGuardarSocio} className="space-y-3 text-sm">
               <div>
-                <label className="block text-xs text-slate-300 mb-1">Rol en el sindicato</label>
+                <label className="block text-xs text-slate-300 mb-1">Rol</label>
                 <select
                   value={formSocioEdit.role}
                   onChange={(e) => setFormSocioEdit({ ...formSocioEdit, role: e.target.value })}
                   className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white"
                 >
                   <option value="socio">Socio</option>
-                  {userRol === 'superadmin' && <option value="admin">Administrador (Presidente)</option>}
+                  {userRol === 'superadmin' && <option value="admin">Administrador (Directiva)</option>}
                 </select>
               </div>
               <div>
-                <label className="block text-xs text-slate-300 mb-1">Estado de acceso</label>
+                <label className="block text-xs text-slate-300 mb-1">Estado</label>
                 <select
                   value={formSocioEdit.estado}
                   onChange={(e) => setFormSocioEdit({ ...formSocioEdit, estado: e.target.value })}
@@ -2155,7 +2386,7 @@ function AdminDashboardContent() {
                 >
                   <option value="activo">Activo</option>
                   <option value="pendiente_correo">Falta validar correo</option>
-                  <option value="suspendido">Suspendido (sin acceso)</option>
+                  <option value="suspendido">Suspendido</option>
                 </select>
               </div>
               <div className="flex justify-end gap-2 pt-2">
@@ -2170,7 +2401,7 @@ function AdminDashboardContent() {
                   type="submit"
                   className="px-5 py-2.5 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] text-sm font-bold cursor-pointer"
                 >
-                  Guardar cambios
+                  Guardar
                 </button>
               </div>
             </form>
@@ -2178,22 +2409,5 @@ function AdminDashboardContent() {
         </div>
       )}
     </div>
-  );
-}
-
-export default function AdminDashboardPage() {
-  return (
-    <Suspense
-      fallback={
-        <div
-          suppressHydrationWarning
-          className="w-full min-h-[60vh] bg-[#0b0e14] text-slate-200 flex items-center justify-center p-6"
-        >
-          <p className="text-sm text-slate-300">Cargando panel...</p>
-        </div>
-      }
-    >
-      <AdminDashboardContent />
-    </Suspense>
   );
 }
