@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '../../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
+import TendenciasSindicato from './TendenciasSindicato';
 
 const Icons = {
   Chart: () => (
@@ -1299,12 +1300,19 @@ export default function AdminPanel() {
     );
   }
 
+  // Una asistencia pertenece a una asamblea por su asamblea_id (migración 001).
+  // Si el registro es antiguo y no tiene asamblea_id, se compara por título como antes.
+  const perteneceAAsamblea = (asistencia: any, asamblea: any) =>
+    asistencia.asamblea_id != null
+      ? Number(asistencia.asamblea_id) === Number(asamblea.id)
+      : asistencia.asamblea_titulo?.trim().toLowerCase() === asamblea.titulo?.trim().toLowerCase();
+
   // --- CÁLCULO DE MÉTRICAS Y FILTROS DEL PADRÓN DE POSTULACIONES ---
   const postulacionesPendientesCount = todasPostulacionesSind.filter(
     (p) => String(p.estado || 'Pendiente').toLowerCase() === 'pendiente'
   ).length;
   const postulacionesAprobadasCount = todasPostulacionesSind.filter(
-    (p) => String(p.estado || '').toLowerCase() === 'aceptada'
+    (p) => ['aceptada', 'aprobada'].includes(String(p.estado || '').toLowerCase())
   ).length;
   const postulacionesRechazadasCount = todasPostulacionesSind.filter(
     (p) => String(p.estado || '').toLowerCase() === 'rechazada'
@@ -1313,7 +1321,7 @@ export default function AdminPanel() {
   const postulacionesMostradas = todasPostulacionesSind.filter((p) => {
     const est = String(p.estado || 'Pendiente').toLowerCase();
     if (filtroEstadoPostulacion === 'pendientes') return est === 'pendiente';
-    if (filtroEstadoPostulacion === 'aprobadas') return est === 'aceptada';
+    if (filtroEstadoPostulacion === 'aprobadas') return est === 'aceptada' || est === 'aprobada';
     if (filtroEstadoPostulacion === 'rechazadas') return est === 'rechazada';
     return true;
   });
@@ -2013,9 +2021,7 @@ export default function AdminPanel() {
                   ) : (
                     <div className="space-y-3.5">
                       {historialAsambleas.slice(0, 6).map((asam) => {
-                        const asistentesSesion = asistenciaRegistros.filter(
-                          (a) => a.asamblea_titulo?.trim().toLowerCase() === asam.titulo?.trim().toLowerCase()
-                        );
+                        const asistentesSesion = asistenciaRegistros.filter((a) => perteneceAAsamblea(a, asam));
                         const enSala = asistentesSesion.filter((a) => !a.hora_salida).length;
                         const pctQuorum =
                           totalSocios > 0
@@ -2104,6 +2110,9 @@ export default function AdminPanel() {
                   </div>
                 </div>
               </div>
+
+              {/* TENDENCIAS MES A MES (funciones reporte_* de la migración 002) */}
+              <TendenciasSindicato sindicatoId={idSindicatoActual} />
             </div>
           )}
 
@@ -2262,9 +2271,7 @@ export default function AdminPanel() {
                   </div>
                 ) : (
                   historialAsambleas.map((asam) => {
-                    const asistentes = asistenciaRegistros.filter(
-                      (a) => a.asamblea_titulo?.trim().toLowerCase() === asam.titulo?.trim().toLowerCase()
-                    );
+                    const asistentes = asistenciaRegistros.filter((a) => perteneceAAsamblea(a, asam));
 
                     return (
                       <div key={asam.id} className="bg-[#131c2e] border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
