@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase';
 import emailjs from '@emailjs/browser';
 import Link from 'next/link';
+import { notificar } from '../../lib/notificar';
 
 export default function SoportePage() {
   const [rutUsuario, setRutUsuario] = useState<string>('');
@@ -78,7 +79,7 @@ export default function SoportePage() {
     ]);
 
     if (error) {
-      alert('❌ Error al guardar el ticket en la base de datos: ' + error.message);
+      notificar('❌ Error al guardar el ticket en la base de datos: ' + error.message);
       setEnviando(false);
       return; 
     } 
@@ -102,7 +103,7 @@ export default function SoportePage() {
     }
 
     // 3. Notificación al usuario y reset del formulario
-    alert('✅ ¡Solicitud ingresada correctamente! Se ha enviado un comprobante a tu correo.');
+    notificar('✅ ¡Solicitud ingresada correctamente! Se ha enviado un comprobante a tu correo.');
     setEmail('');
     setTipo('Consulta General');
     setAsunto('');
@@ -150,19 +151,19 @@ export default function SoportePage() {
             },
             'GG3tS19diXKenuD_-' 
           );
-          alert(`✅ Ticket actualizado en base de datos.\n📧 Notificación enviada exitosamente al correo: ${correoSocio}`);
+          notificar(`✅ Ticket actualizado en base de datos.\n📧 Notificación enviada exitosamente al correo: ${correoSocio}`);
         } catch (emailError: any) {
           console.error("Fallo detallado de EmailJS:", emailError);
-          alert(`⚠️ El ticket se guardó, pero falló el envío del correo.\nMotivo: ${emailError.text || emailError.message}`);
+          notificar(`⚠️ El ticket se guardó, pero falló el envío del correo.\nMotivo: ${emailError.text || emailError.message}`);
         }
       } else {
-        alert('✅ Ticket actualizado correctamente (Sin enviar notificación por falta de respuesta escrita).');
+        notificar('✅ Ticket actualizado correctamente (Sin enviar notificación por falta de respuesta escrita).');
       }
 
       setIsModalOpen(false);
       fetchTickets(rutUsuario, isAdmin);
     } catch (err: any) {
-      alert('❌ Error de Base de Datos (Supabase): ' + (err.message || err.details));
+      notificar('❌ Error de Base de Datos (Supabase): ' + (err.message || err.details));
     } finally {
       setActualizando(false);
     }
@@ -174,10 +175,10 @@ export default function SoportePage() {
       const supabase = createClient();
       const { error } = await supabase.from('tickets_soporte').delete().eq('id', id);
       if (error) throw error;
-      alert('🗑️ Ticket eliminado.');
+      notificar('🗑️ Ticket eliminado.');
       fetchTickets(rutUsuario, isAdmin);
     } catch(err: any) {
-      alert('❌ Error al eliminar: ' + err.message);
+      notificar('❌ Error al eliminar: ' + err.message);
     }
   };
 

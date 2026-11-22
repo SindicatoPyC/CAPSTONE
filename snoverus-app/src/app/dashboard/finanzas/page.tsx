@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
+import { notificar } from '../../lib/notificar';
 
 export default function FinanzasPage() {
   const [user, setUser] = useState<any>(null);
@@ -155,7 +156,7 @@ export default function FinanzasPage() {
       }).eq('id', id);
       if (error) throw error;
       fetchFinanzas(mesActualStr, new Date().getFullYear(), diasRestantes);
-    } catch (err: any) { alert('❌ Error al actualizar: ' + err.message); }
+    } catch (err: any) { notificar('❌ Error al actualizar: ' + err.message); }
   };
 
   const handleEliminarCuota = async (id: number) => {
@@ -166,7 +167,7 @@ export default function FinanzasPage() {
       const { error } = await supabase.from('cuotas_sindicales').delete().eq('id', id);
       if (error) throw error;
       fetchFinanzas(mesActualStr, new Date().getFullYear(), diasRestantes);
-    } catch (err: any) { alert('❌ Error al eliminar: ' + err.message); }
+    } catch (err: any) { notificar('❌ Error al eliminar: ' + err.message); }
   };
 
   const handleRegistrarPagoAdmin = async (e: React.FormEvent) => {
@@ -181,7 +182,7 @@ export default function FinanzasPage() {
       setShowModalPagoAdmin(false);
       fetchFinanzas(mesActualStr, new Date().getFullYear(), diasRestantes);
       setPagoRut('');
-    } catch (err: any) { alert('❌ Error: ' + err.message); } finally { setGuardandoPago(false); }
+    } catch (err: any) { notificar('❌ Error: ' + err.message); } finally { setGuardandoPago(false); }
   };
 
   const handleGuardarGrafico = async (e: React.FormEvent) => {
@@ -190,7 +191,7 @@ export default function FinanzasPage() {
     try {
       const supabase = createClient();
       const totalPorcentaje = editGastos.reduce((sum, item) => sum + Number(item.value), 0);
-      if (totalPorcentaje !== 100) return alert(`⚠️ Los porcentajes deben sumar exactamente 100%. Suman ${totalPorcentaje}%.`);
+      if (totalPorcentaje !== 100) return notificar(`⚠️ Los porcentajes deben sumar exactamente 100%. Suman ${totalPorcentaje}%.`);
 
       for (const gasto of editGastos) {
         if (gasto.id) await supabase.from('cuotas_sindicales').update({ porcentaje: gasto.value }).eq('id', gasto.id);
@@ -198,12 +199,12 @@ export default function FinanzasPage() {
       }
       setShowModalGrafico(false);
       fetchFinanzas(mesActualStr, new Date().getFullYear(), diasRestantes);
-    } catch (err: any) { alert('❌ Error: ' + err.message); } finally { setGuardandoGrafico(false); }
+    } catch (err: any) { notificar('❌ Error: ' + err.message); } finally { setGuardandoGrafico(false); }
   };
 
   const handleNotificarPagoSocio = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!socioPagoArchivo) return alert('⚠️ Adjunta la foto o PDF de tu transferencia.');
+    if (!socioPagoArchivo) return notificar('⚠️ Adjunta la foto o PDF de tu transferencia.');
     setEnviandoPagoSocio(true);
     try {
       const supabase = createClient();
@@ -219,11 +220,11 @@ export default function FinanzasPage() {
       }]);
       if (dbError) throw dbError;
       
-      alert('✅ Comprobante enviado. En revisión.');
+      notificar('✅ Comprobante enviado. En revisión.');
       setShowModalInstruccionesPago(false);
       fetchFinanzas(mesActualStr, new Date().getFullYear(), diasRestantes);
       setSocioPagoArchivo(null);
-    } catch (err: any) { alert('❌ Error al enviar: ' + err.message); } finally { setEnviandoPagoSocio(false); }
+    } catch (err: any) { notificar('❌ Error al enviar: ' + err.message); } finally { setEnviandoPagoSocio(false); }
   };
 
   const handlePorcentajeChange = (index: number, nuevoValor: string) => {

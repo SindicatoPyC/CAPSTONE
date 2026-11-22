@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '../../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
+import { notificar } from '../../lib/notificar';
 
 export default function NegociacionPage() {
   const router = useRouter();
@@ -105,11 +106,11 @@ export default function NegociacionPage() {
         }).eq('id', infoGeneral.id);
       }
 
-      alert('✅ Información actualizada.');
+      notificar('✅ Información actualizada.');
       setShowModalInfo(false);
       setArchivoPetitorio(null);
       fetchNegociacionData();
-    } catch (err: any) { alert("❌ Error: " + err.message); } finally { setGuardando(false); }
+    } catch (err: any) { notificar("❌ Error: " + err.message); } finally { setGuardando(false); }
   };
 
   // --- NUEVA FUNCIÓN ADMIN: ARCHIVAR PROCESO ---
@@ -130,10 +131,10 @@ export default function NegociacionPage() {
         estado: 'Activa'
       }]);
 
-      alert('📦 Proceso archivado exitosamente. Se ha habilitado una nueva negociación.');
+      notificar('📦 Proceso archivado exitosamente. Se ha habilitado una nueva negociación.');
       fetchNegociacionData();
     } catch (err: any) {
-      alert("❌ Error al archivar: " + err.message);
+      notificar("❌ Error al archivar: " + err.message);
       setLoading(false);
     }
   };
@@ -154,7 +155,7 @@ export default function NegociacionPage() {
 
   const handleGuardarHito = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!infoGeneral) return alert("No hay una negociación activa.");
+    if (!infoGeneral) return notificar("No hay una negociación activa.");
     setGuardando(true);
     try {
       const supabase = createClient();
@@ -165,7 +166,7 @@ export default function NegociacionPage() {
       }
       setShowModalHito(false);
       fetchNegociacionData();
-    } catch (err: any) { alert("❌ Error: " + err.message); } finally { setGuardando(false); }
+    } catch (err: any) { notificar("❌ Error: " + err.message); } finally { setGuardando(false); }
   };
 
   const handleEliminarHito = async (id: number) => {
@@ -174,7 +175,7 @@ export default function NegociacionPage() {
       const supabase = createClient();
       await supabase.from('hitos_negociacion').delete().eq('id', id);
       setHitos(hitos.filter(h => h.id !== id));
-    } catch (err: any) { alert("Error al eliminar."); }
+    } catch (err: any) { notificar("Error al eliminar."); }
   };
 
   // NUEVA FUNCIÓN: CAMBIO DE ESTADO EN VIVO DESDE LA TARJETA
@@ -185,7 +186,7 @@ export default function NegociacionPage() {
       // Actualización optimista del UI
       setHitos(hitos.map(h => h.id === id ? { ...h, estado: nuevoEstado } : h));
     } catch (err: any) {
-      alert("❌ Error al actualizar el estado: " + err.message);
+      notificar("❌ Error al actualizar el estado: " + err.message);
     }
   };
 

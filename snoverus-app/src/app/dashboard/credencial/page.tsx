@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase';
 import { useRouter } from 'next/navigation';
 import { QRCodeCanvas } from 'qrcode.react';
+import { notificar } from '../../lib/notificar';
 
 export default function CredencialPage() {
   const [isMounted, setIsMounted] = useState(false);
@@ -93,7 +94,7 @@ export default function CredencialPage() {
       router.push("/");
     } catch (error) {
       console.error("Error al eliminar la cuenta:", error);
-      alert("Hubo un problema al procesar la solicitud de eliminación. Verifica haber creado la función RPC en Supabase.");
+      notificar("Hubo un problema al procesar la solicitud de eliminación. Verifica haber creado la función RPC en Supabase.");
       setEliminando(false);
     }
   };

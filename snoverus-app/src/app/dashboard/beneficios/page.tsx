@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { createClient } from '../../lib/supabase';
 import emailjs from '@emailjs/browser';
 import Link from 'next/link';
+import { notificar } from '../../lib/notificar';
+import DialogoConfirmacion, { validarCorreo } from '../../../components/DialogoConfirmacion';
 
 export default function BeneficiosSmartPage() {
   const [beneficios, setBeneficios] = useState<any[]>([]);
@@ -16,6 +18,12 @@ export default function BeneficiosSmartPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [socioInfo, setSocioInfo] = useState({ rut: '---', nombre: 'Socio Activo' });
   const [procesandoUso, setProcesandoUso] = useState<number | null>(null);
+  const [correoSocio, setCorreoSocio] = useState('');
+
+  // Diálogos de confirmación (reemplazan window.prompt y window.confirm)
+  const [beneficioACanjear, setBeneficioACanjear] = useState<any | null>(null);
+  const [convenioAEliminar, setConvenioAEliminar] = useState<any | null>(null);
+  const [eliminando, setEliminando] = useState(false);
   
   // Estados para el Modal (Admin)
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -60,7 +68,11 @@ export default function BeneficiosSmartPage() {
       const { data: { user } } = await supabase.auth.getUser();
 
       if (user) {
-        const { data: profile } = await supabase.from('profiles').select('sindicato_id, role').eq('id', user.id).single();
+        const { data: profile } = await supabase.from('profiles').select('sindicato_id, role, rut, email').eq('id', user.id).single();
+
+        // Correo del socio para el comprobante (antes venía fijo: contacto@sindicatopyc.cl)
+        setCorreoSocio(profile?.email || user.email || '');
+        if (profile?.rut) setSocioInfo(prev => ({ ...prev, rut: profile.rut }));
         
         let targetSindicatoId = profile?.sindicato_id;
 
@@ -105,17 +117,17 @@ export default function BeneficiosSmartPage() {
     : beneficios.filter(b => b.categoria === filtroActivo);
 
   // === CANJE DE BENEFICIO CON SERVICE PRIMARY CORRECTO Y FALLBACK SUPABASE ===
-  const handleUsarBeneficio = async (beneficio: any) => {
-    const correoDestino = window.prompt(
-      `🎟️ ¿Deseas reclamar y utilizar el beneficio "${beneficio.titulo}"?\n\nConfirma tu correo electrónico para recibir tu comprobante:`,
-      'contacto@sindicatopyc.cl'
-    );
+  // Abre el diálogo de canje; el correo se confirma ahí
+  const handleUsarBeneficio = (beneficio: any) => {
+    setBeneficioACanjear(beneficio);
+  };
 
-    if (!correoDestino || !correoDestino.trim()) {
-      alert("⚠️ Acción cancelada: Se requiere un correo electrónico válido.");
-      return;
-    }
+  const confirmarCanje = async (correo?: string) => {
+    const beneficio = beneficioACanjear;
+    const correoDestino = (correo || '').trim();
+    if (!beneficio || !correoDestino) return;
 
+    setBeneficioACanjear(null);
     setProcesandoUso(beneficio.id);
 
     try {
@@ -142,7 +154,7 @@ export default function BeneficiosSmartPage() {
       );
 
       if (respuesta.status === 200) {
-        alert(`✅ ¡Beneficio canjeado con éxito!\n\nComprobante digital enviado a: ${correoDestino}`);
+        notificar(`✅ ¡Beneficio canjeado con éxito!\n\nComprobante digital enviado a: ${correoDestino}`);
       }
     } catch (err: any) {
       console.warn("EmailJS con restricción (412). Resguardando en Supabase...", err);
@@ -158,10 +170,10 @@ export default function BeneficiosSmartPage() {
           estado: 'Pendiente'
         }]);
         
-        alert(`✅ ¡Beneficio reservado con éxito!\n\nRegistramos tu solicitud en la directiva. Te contactaremos a: ${correoDestino}`);
+        notificar(`✅ ¡Beneficio reservado con éxito!\n\nRegistramos tu solicitud en la directiva. Te contactaremos a: ${correoDestino}`);
       } catch (dbErr: any) {
         console.error("Error en DB fallback:", dbErr);
-        alert(`✅ ¡Solicitud registrada!\n\nMuestra tu credencial con el RUT ${socioInfo.rut} en el convenio para aplicar el descuento.`);
+        notificar(`✅ ¡Solicitud registrada!\n\nMuestra tu credencial con el RUT ${socioInfo.rut} en el convenio para aplicar el descuento.`);
       }
     } finally {
       setProcesandoUso(null);
@@ -184,7 +196,7 @@ export default function BeneficiosSmartPage() {
   const handleGuardar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sindicatoIdActual) {
-      alert("❌ Error: No se detectó el ID del Sindicato activo.");
+      notificar("❌ Error: No se detectó el ID del Sindicato activo.");
       return;
     }
     setGuardando(true);
@@ -214,31 +226,40 @@ export default function BeneficiosSmartPage() {
       if (isEditing && currentId) {
         const { error } = await supabase.from('beneficios').update(datosBeneficio).eq('id', currentId);
         if (error) throw error;
-        alert('✅ Convenio actualizado con éxito.');
+        notificar('✅ Convenio actualizado con éxito.');
       } else {
         const { error } = await supabase.from('beneficios').insert([datosBeneficio]);
         if (error) throw error;
-        alert('✨ Nuevo convenio publicado para tu organización.');
+        notificar('✨ Nuevo convenio publicado para tu organización.');
       }
       setIsModalOpen(false);
       fetchDatosYConfiguracion(); 
     } catch (err: any) {
-      alert('❌ Error: ' + err.message);
+      notificar('❌ Error: ' + err.message);
     } finally {
       setGuardando(false);
     }
   };
 
-  const handleEliminar = async (id: number) => {
-    if (!window.confirm("⚠️ ¿Estás seguro de eliminar este convenio?")) return;
+  // Abre el diálogo de confirmación; se elimina al confirmar
+  const handleEliminar = (id: number) => {
+    setConvenioAEliminar(beneficios.find((b) => b.id === id) ?? { id });
+  };
+
+  const confirmarEliminar = async () => {
+    if (!convenioAEliminar) return;
+    setEliminando(true);
     try {
       const supabase = createClient();
-      const { error } = await supabase.from('beneficios').delete().eq('id', id);
+      const { error } = await supabase.from('beneficios').delete().eq('id', convenioAEliminar.id);
       if (error) throw error;
-      alert('🗑️ Convenio eliminado.');
+      notificar('🗑️ Convenio eliminado.');
+      setConvenioAEliminar(null);
       fetchDatosYConfiguracion();
     } catch(err: any) {
-      alert('❌ Error: ' + err.message);
+      notificar('❌ Error: ' + err.message);
+    } finally {
+      setEliminando(false);
     }
   };
 
@@ -458,6 +479,50 @@ export default function BeneficiosSmartPage() {
           </div>
         </div>
       )}
+
+      {/* DIÁLOGO: CANJE DE BENEFICIO (SOCIO) */}
+      <DialogoConfirmacion
+        abierto={!!beneficioACanjear}
+        icono="🎟️"
+        titulo={`¿Canjear "${beneficioACanjear?.titulo ?? ''}"?`}
+        mensaje={
+          <>
+            {beneficioACanjear?.descuento && (
+              <span className="inline-block text-emerald-400 font-black text-xs bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 mb-2">
+                {beneficioACanjear.descuento}
+              </span>
+            )}
+            <span className="block">Te enviaremos el comprobante a este correo. Puedes cambiarlo si prefieres otro.</span>
+          </>
+        }
+        campo={{
+          etiqueta: 'Correo para el comprobante',
+          tipo: 'email',
+          valorInicial: correoSocio,
+          placeholder: 'tu@correo.cl',
+          validar: validarCorreo,
+        }}
+        textoConfirmar="Confirmar canje"
+        onConfirmar={confirmarCanje}
+        onCancelar={() => setBeneficioACanjear(null)}
+      />
+
+      {/* DIÁLOGO: ELIMINAR CONVENIO (ADMIN) */}
+      <DialogoConfirmacion
+        abierto={!!convenioAEliminar}
+        icono="🗑️"
+        variante="peligro"
+        titulo="¿Eliminar este convenio?"
+        mensaje={
+          <>
+            Se eliminará <b className="text-white">{convenioAEliminar?.titulo ?? 'el convenio'}</b> y los socios dejarán de verlo. Esta acción no se puede deshacer.
+          </>
+        }
+        textoConfirmar="Eliminar"
+        procesando={eliminando}
+        onConfirmar={confirmarEliminar}
+        onCancelar={() => setConvenioAEliminar(null)}
+      />
     </div>
   );
 }

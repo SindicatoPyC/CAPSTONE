@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
+import { notificar } from '../../lib/notificar';
 
 export default function ActasPage() {
   const [actas, setActas] = useState<any[]>([]);
@@ -108,16 +109,16 @@ export default function ActasPage() {
 
       if (isEditing && currentId) {
         await supabase.from('libro_actas').update(datosGuardar).eq('id', currentId);
-        alert('✅ Acta actualizada exitosamente.');
+        notificar('✅ Acta actualizada exitosamente.');
       } else {
         await supabase.from('libro_actas').insert([datosGuardar]);
-        alert('✅ Nueva Acta publicada exitosamente.');
+        notificar('✅ Nueva Acta publicada exitosamente.');
       }
 
       setShowModal(false);
       fetchInitialData();
     } catch (err: any) {
-      alert("❌ Error al guardar: " + err.message);
+      notificar("❌ Error al guardar: " + err.message);
     } finally {
       setGuardando(false);
     }
@@ -134,7 +135,7 @@ export default function ActasPage() {
       
       setActas(actas.filter(acta => acta.id !== id));
     } catch (err: any) {
-      alert("❌ Error al eliminar el acta: " + err.message);
+      notificar("❌ Error al eliminar el acta: " + err.message);
     } finally {
       setBorrandoId(null);
     }
