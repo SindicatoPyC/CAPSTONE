@@ -1,536 +1,434 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import '../landing.css';
+import { createClient } from '../lib/supabase';
+import { PLANES_SAAS, PlanId, DefinicionPlan, ETIQUETAS_MODULOS } from '../lib/planes';
 
-// ─── DATOS ────────────────────────────────────────────────────────────────────
-const PLANES = [
-  {
-    id: 'basico',
-    nombre: 'Básico',
-    mensual: 4990,
-    descripcion: 'Para sindicatos pequeños que dan sus primeros pasos en la digitalización.',
-    destacado: false,
-    features: [
-      'Hasta 25 socios',
-      'Portal de socios con login por RUT',
-      'Gestión de beneficios básicos',
-      'Actas digitales',
-      'Soporte por correo',
-    ],
-    noIncluye: [
-      'Votaciones digitales',
-      'Módulo de asesoría legal',
-      'Reportes avanzados',
-      'API de integración',
-    ],
-    cta: 'Empezar con Básico',
-  },
-  {
-    id: 'estandar',
-    nombre: 'Estándar',
-    mensual: 9990,
-    descripcion: 'El plan más elegido. Todo lo necesario para gestionar un sindicato activo.',
-    destacado: true,
-    features: [
-      'Hasta 50 socios',
-      'Portal de socios con login por RUT',
-      'Gestión de beneficios completa',
-      'Actas y documentos digitales',
-      'Votaciones digitales',
-      'Módulo de asesoría legal',
-      'Reportes y estadísticas',
-      'Soporte prioritario',
-    ],
-    noIncluye: [
-      'API de integración',
-      'Dominio personalizado',
-    ],
-    cta: 'Empezar con Estándar',
-  },
-  {
-    id: 'premium',
-    nombre: 'Premium',
-    mensual: 14990,
-    descripcion: 'Para organizaciones grandes que necesitan el máximo control y personalización.',
-    destacado: false,
-    features: [
-      'Socios ilimitados',
-      'Portal de socios con login por RUT',
-      'Gestión de beneficios completa',
-      'Actas y documentos digitales',
-      'Votaciones digitales',
-      'Módulo de asesoría legal',
-      'Reportes y estadísticas avanzados',
-      'API de integración',
-      'Dominio personalizado',
-      'Soporte dedicado 24/7',
-    ],
-    noIncluye: [],
-    cta: 'Contactar para Premium',
-  },
-];
-
-const FAQS = [
-  {
-    q: '¿Puedo cambiar de plan más adelante?',
-    a: 'Sí, puedes subir o bajar de plan en cualquier momento. El cambio se aplica al inicio del siguiente período de facturación.',
-  },
-  {
-    q: '¿Existe un período de prueba?',
-    a: 'Sí, ofrecemos 30 días de prueba gratuita en los planes Básico y Estándar. No se requiere tarjeta de crédito para comenzar.',
-  },
-  {
-    q: '¿Cómo se cobra el plan anual?',
-    a: 'Se cobra el equivalente a 10 meses al inicio del año — pagas una vez y tienes el servicio completo por 12 meses, ahorrando 2 meses.',
-  },
-  {
-    q: '¿Cómo migro los datos de mi sindicato actual?',
-    a: 'Nuestro equipo te acompaña en el proceso de migración sin costo adicional. Basta con enviarnos el listado de socios en Excel y nosotros hacemos el resto.',
-  },
-];
-
-// ─── UTILIDADES ───────────────────────────────────────────────────────────────
-function fmt(n: number) {
-  return '$' + n.toLocaleString('es-CL');
+function formatearRut(valor: string): string {
+  const clean = valor.replace(/[^0-9kK]/g, '').toUpperCase().slice(0, 9);
+  if (clean.length <= 1) return clean;
+  const body = clean.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${body}-${clean.slice(-1)}`;
 }
 
-function IconCheck() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
-      <circle cx="7.5" cy="7.5" r="7.5" fill="rgba(201,148,10,0.15)" />
-      <path d="M4.5 7.5l2 2 4-4" stroke="#C9940A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
+function PlanesContent() {
+  const searchParams = useSearchParams();
 
-function IconX() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
-      <circle cx="7.5" cy="7.5" r="7.5" fill="rgba(255,255,255,0.04)" />
-      <path d="M5 5l5 5M10 5l-5 5" stroke="rgba(255,255,255,0.18)" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-// ─── MODAL DE COMPRA ──────────────────────────────────────────────────────────
-type Plan = typeof PLANES[number];
-
-function ModalCompra({ plan, onClose }: { plan: Plan; onClose: () => void }) {
   const [ciclo, setCiclo] = useState<'mensual' | 'anual'>('mensual');
+  const [planElegido, setPlanElegido] = useState<DefinicionPlan | null>(null);
+  const [redirigiendoWebpay, setRedirigiendoWebpay] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const precioMensual = plan.mensual;
-  const precioAnual   = plan.mensual * 10;           // 10 meses = 2 gratis
-  const ahorro        = plan.mensual * 2;
+  const [form, setForm] = useState({
+    usuario_nombre: '',
+    usuario_rut: '',
+    usuario_email: '',
+    nombre_sindicato: '',
+    rut_sindicato: '',
+  });
 
-  return (
-    <>
-      {/* Overlay */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'fixed', inset: 0,
-          background: 'rgba(0,0,0,0.6)',
-          backdropFilter: 'blur(5px)',
-          zIndex: 300,
-        }}
-      />
+  // Si llega desde la landing con ?plan=trial|basico|estandar|premium, abre el modal al tiro
+  useEffect(() => {
+    const paramPlan = searchParams.get('plan') as PlanId | null;
+    if (paramPlan && PLANES_SAAS[paramPlan]) {
+      setPlanElegido(PLANES_SAAS[paramPlan]);
+    }
+  }, [searchParams]);
 
-      {/* Panel */}
-      <div style={{
-        position: 'fixed',
-        top: '50%', left: '50%',
-        transform: 'translate(-50%, -50%)',
-        zIndex: 301,
-        width: 'min(780px, 94vw)',
-        background: 'var(--bg2)',
-        border: '1px solid var(--border)',
-        borderRadius: 20,
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        overflow: 'hidden',
-      }} className="pyc-modal-grid">
+  const calcularMontoPlan = (plan: DefinicionPlan) => {
+    if (plan.esTrial) return 50; // Cargo simbólico $50 CLP requerido por API Webpay Plus (reembolsable)
+    return ciclo === 'anual' ? plan.precioMensual * 10 : plan.precioMensual;
+  };
 
-        {/* ── Columna izquierda: resumen del plan ── */}
-        <div style={{
-          padding: '36px 32px',
-          borderRight: '1px solid var(--border)',
-          background: 'var(--bg)',
-        }}>
-          <div style={{
-            fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-            color: 'var(--gold)', marginBottom: 10,
-          }}>
-            Plan incluido
-          </div>
-          <div style={{
-            fontSize: 22, fontWeight: 800,
-            color: 'var(--fg)', marginBottom: 6,
-            fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-          }}>
-            {plan.nombre}
-          </div>
-          <p style={{ fontSize: 13, color: 'var(--fg2)', lineHeight: 1.6, marginBottom: 28 }}>
-            {plan.descripcion}
-          </p>
+  const abrirCheckout = (id: PlanId) => {
+    setErrorMsg('');
+    setPlanElegido(PLANES_SAAS[id]);
+  };
 
-          <div style={{ height: 1, background: 'var(--border)', marginBottom: 24 }} />
+  const handlePagarConWebpay = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!planElegido) return;
+    setErrorMsg('');
 
-          <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 11 }}>
-            {plan.features.map(f => (
-              <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: 'var(--fg2)' }}>
-                <IconCheck />{f}
-              </li>
-            ))}
-            {plan.noIncluye.map(f => (
-              <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: 'var(--fg3)' }}>
-                <IconX />{f}
-              </li>
-            ))}
-          </ul>
-        </div>
+    if (!form.usuario_email.includes('@')) {
+      setErrorMsg('Ingresa un correo electrónico válido (Gmail).');
+      return;
+    }
 
-        {/* ── Columna derecha: opciones de pago ── */}
-        <div style={{ padding: '36px 32px', display: 'flex', flexDirection: 'column' }}>
+    setRedirigiendoWebpay(true);
 
-          {/* Cerrar */}
-          <button
-            onClick={onClose}
-            style={{
-              alignSelf: 'flex-end',
-              width: 32, height: 32, borderRadius: 8,
-              background: 'var(--bg3)', border: '1px solid var(--border)',
-              color: 'var(--fg2)', cursor: 'pointer', fontSize: 14,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              marginBottom: 24,
-            }}
-          >✕</button>
+    try {
+      const ordenNumero = `ORD-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
+      const sessionId = `SES-${Date.now()}`;
+      const montoWebpay = calcularMontoPlan(planElegido);
 
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg2)', marginBottom: 12 }}>
-            Elige tu ciclo de pago
-          </div>
+      // 1. Crear transacción real en Transbank Webpay Plus Integración
+      const resTbk = await fetch('/api/webpay/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          buyOrder: ordenNumero,
+          sessionId,
+          amount: montoWebpay,
+        }),
+      });
 
-          {/* Toggle mensual / anual */}
-          {(['mensual', 'anual'] as const).map(c => {
-            const activo = ciclo === c;
-            const esAnual = c === 'anual';
-            return (
-              <button
-                key={c}
-                onClick={() => setCiclo(c)}
-                style={{
-                  width: '100%',
-                  padding: '16px 18px',
-                  borderRadius: 12,
-                  border: activo ? '2px solid #C9940A' : '2px solid var(--border)',
-                  background: activo ? 'rgba(201,148,10,0.12)' : 'var(--bg3)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  marginBottom: 10,
-                  transition: 'border-color 0.15s, background 0.15s',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                  {/* Radio + texto */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    {/* Radio visual */}
-                    <div style={{
-                      width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
-                      border: activo ? '2px solid #C9940A' : '2px solid var(--fg3)',
-                      background: 'transparent',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      transition: 'border-color 0.15s',
-                    }}>
-                      {activo && (
-                        <div style={{
-                          width: 9, height: 9, borderRadius: '50%',
-                          background: '#C9940A',
-                        }} />
-                      )}
-                    </div>
-                    <div>
-                      <div style={{
-                        fontSize: 14, fontWeight: 700,
-                        color: activo ? '#ECEAE3' : 'var(--fg2)',
-                        marginBottom: 2,
-                        fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-                      }}>
-                        {esAnual ? 'Pago anual' : 'Pago mensual'}
-                      </div>
-                      <div style={{ fontSize: 12, color: activo ? 'rgba(201,148,10,0.9)' : 'var(--fg3)' }}>
-                        {esAnual
-                          ? `${fmt(precioAnual)} al año · ${fmt(precioMensual)}/mes`
-                          : `${fmt(precioMensual)} al mes`}
-                      </div>
-                    </div>
-                  </div>
-                  {/* Badge ahorro */}
-                  {esAnual && (
-                    <div style={{
-                      background: '#C9940A',
-                      color: '#000',
-                      fontSize: 10,
-                      fontWeight: 800,
-                      padding: '4px 9px',
-                      borderRadius: 100,
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0,
-                      letterSpacing: '0.02em',
-                    }}>
-                      Ahorras {fmt(ahorro)}
-                    </div>
-                  )}
-                </div>
-              </button>
-            );
-          })}
+      const tbkData = await resTbk.json();
+      if (!resTbk.ok || !tbkData?.url || !tbkData?.token) {
+        throw new Error(tbkData?.error || 'No se pudo iniciar la sesión de Webpay.');
+      }
 
-          {/* Resumen del total */}
-          <div style={{
-            marginTop: 8,
-            padding: '16px 20px',
-            background: 'rgba(201,148,10,0.06)',
-            border: '1px solid var(--gold-line)',
-            borderRadius: 12,
-            marginBottom: 24,
-          }}>
-            <div style={{ fontSize: 12, color: 'var(--fg3)', marginBottom: 4 }}>Total a pagar hoy</div>
-            <div style={{
-              fontSize: 28, fontWeight: 800,
-              color: 'var(--fg)',
-              fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-              letterSpacing: '-0.02em',
-            }}>
-              {ciclo === 'mensual' ? fmt(precioMensual) : fmt(precioAnual)}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--fg3)', marginTop: 4 }}>
-              {ciclo === 'anual' ? '12 meses de acceso · incluye IVA' : 'Primer mes · incluye IVA'}
-            </div>
-          </div>
+      // 2. Guardar orden preliminar en Supabase vinculada al token de Webpay
+      const supabase = createClient();
+      const rutAdminLimpio = form.usuario_rut.replace(/[^0-9kK]/g, '').toUpperCase();
+      const nombrePlanConCiclo = planElegido.esTrial
+        ? planElegido.nombre
+        : `${planElegido.nombre} (${ciclo === 'anual' ? 'Anual' : 'Mensual'})`;
 
-          {/* Botón de acción */}
-          <button style={{
-            width: '100%',
-            background: 'var(--gold)',
-            color: '#000',
-            fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-            fontSize: 14,
-            fontWeight: 700,
-            padding: '14px',
-            border: 'none',
-            borderRadius: 10,
-            cursor: 'pointer',
-          }}>
-            Continuar con {plan.nombre} {ciclo === 'anual' ? '(anual)' : '(mensual)'}
-          </button>
+      const { error: dbErr } = await supabase.from('solicitudes_planes').insert([{
+        orden_numero: ordenNumero,
+        webpay_token: tbkData.token,
+        plan_id: planElegido.id,
+        plan_nombre: nombrePlanConCiclo,
+        monto_pagado: planElegido.esTrial ? 0 : montoWebpay,
+        es_trial: planElegido.esTrial,
+        usuario_nombre: form.usuario_nombre.trim(),
+        usuario_rut: rutAdminLimpio,
+        usuario_email: form.usuario_email.trim().toLowerCase(),
+        nombre_sindicato: form.nombre_sindicato.trim(),
+        rut_sindicato: form.rut_sindicato.trim(),
+        tarjeta_marca: 'Webpay Plus',
+        comprobante_ref: 'INICIADO-WEBPAY',
+        estado: 'Esperando Webpay',
+      }]);
 
-          <p style={{ fontSize: 11, color: 'var(--fg3)', textAlign: 'center', marginTop: 14, lineHeight: 1.5 }}>
-            30 días de prueba gratis. Puedes cancelar en cualquier momento.
-          </p>
-        </div>
-      </div>
-    </>
-  );
-}
+      if (dbErr) throw dbErr;
 
-// ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
-export default function PlanesPage() {
-  const [modalPlan, setModalPlan] = useState<Plan | null>(null);
+      // 3. Redirección oficial por POST con token_ws hacia la pasarela de Webpay Plus
+      const formPost = document.createElement('form');
+      formPost.method = 'POST';
+      formPost.action = tbkData.url;
+
+      const inputToken = document.createElement('input');
+      inputToken.type = 'hidden';
+      inputToken.name = 'token_ws';
+      inputToken.value = tbkData.token;
+
+      formPost.appendChild(inputToken);
+      document.body.appendChild(formPost);
+      formPost.submit();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Ocurrió un error al conectar con Webpay.');
+      setRedirigiendoWebpay(false);
+    }
+  };
+
+  const niveles: DefinicionPlan[] = [
+    PLANES_SAAS.basico,
+    PLANES_SAAS.estandar,
+    PLANES_SAAS.premium,
+  ];
 
   return (
-    <div style={{
-      background: 'var(--bg)',
-      color: 'var(--fg)',
-      fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-      minHeight: '100vh',
-    }}>
+    <div className="min-h-screen bg-[#0b0d12] text-slate-100 font-sans">
+      {/* Navbar */}
+      <nav className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between border-b border-white/[0.06]">
+        <Link href="/" className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-[#e5b32a] text-slate-950 font-bold text-xs flex items-center justify-center">
+            PYC
+          </div>
+          <span className="font-semibold text-sm text-white tracking-tight">Sindicato PYC</span>
+        </Link>
 
-      {/* ── NAVBAR ── */}
-      <nav className="pyc-nav">
-        <div className="pyc-nav-brand">
-          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 11, textDecoration: 'none' }}>
-            <div className="pyc-nav-mark">PYC</div>
-            <span className="pyc-nav-name">Sindicato PYC</span>
-          </Link>
+        <div className="hidden sm:flex items-center gap-7 text-xs text-slate-400">
+          <Link href="/" className="hover:text-white transition-colors">Inicio</Link>
+          <Link href="/#nosotros" className="hover:text-white transition-colors">Nosotros</Link>
+          <Link href="/#trial" className="hover:text-white transition-colors">Trial 30 días</Link>
+          <span className="text-[#e5b32a] font-medium">Planes</span>
         </div>
-        <ul className="pyc-nav-links">
-          <li><Link href="/">Inicio</Link></li>
-          <li><Link href="/#nosotros">Nosotros</Link></li>
-          <li><a href="#planes" style={{ color: 'var(--gold)' }}>Planes</a></li>
-        </ul>
-        <Link href="/" className="pyc-nav-cta">Ingresar</Link>
+
+        <Link
+          href="/"
+          className="px-4 py-2 rounded-lg bg-[#e5b32a] hover:bg-[#f0c038] text-slate-950 font-semibold text-xs transition-colors"
+        >
+          Ingresar
+        </Link>
       </nav>
 
-      {/* ── ENCABEZADO ── */}
-      <header style={{
-        paddingTop: 120, paddingBottom: 64,
-        paddingLeft: 48, paddingRight: 48,
-        textAlign: 'center', maxWidth: 680, margin: '0 auto',
-      }}>
-        <div className="pyc-section-tag" style={{ justifyContent: 'center', display: 'flex', marginBottom: 16 }}>
-          Para dirigentes
+      {/* Contenido */}
+      <main className="max-w-5xl mx-auto px-6 py-14 space-y-10">
+        <div className="text-center space-y-3 max-w-2xl mx-auto">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#e5b32a]">
+            Para Dirigentes
+          </span>
+          <h1 className="text-3xl sm:text-5xl font-bold text-white tracking-tight leading-tight">
+            Digitaliza tu sindicato sin complicaciones
+          </h1>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Procesa tu orden de forma segura mediante <strong className="text-white">Webpay Plus (Transbank)</strong> y recibe tus credenciales oficiales por Gmail.
+          </p>
+
+          {/* Toggle Mensual / Anual */}
+          <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#11141d] border border-white/[0.08] mt-3">
+            <button
+              type="button"
+              onClick={() => setCiclo('mensual')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                ciclo === 'mensual' ? 'bg-[#e5b32a] text-slate-950' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Pago mensual
+            </button>
+            <button
+              type="button"
+              onClick={() => setCiclo('anual')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-2 ${
+                ciclo === 'anual' ? 'bg-[#e5b32a] text-slate-950' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>Pago anual</span>
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded-full ${
+                  ciclo === 'anual' ? 'bg-slate-950/20 text-slate-950' : 'bg-[#e5b32a]/15 text-[#e5b32a]'
+                }`}
+              >
+                2 meses gratis
+              </span>
+            </button>
+          </div>
         </div>
-        <h1 style={{
-          fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-          fontSize: 'clamp(30px, 5vw, 48px)',
-          fontWeight: 800, color: 'var(--fg)',
-          letterSpacing: '-0.025em', lineHeight: 1.08, marginBottom: 18,
-        }}>
-          Digitaliza tu sindicato<br />sin complicaciones
-        </h1>
-        <p style={{ fontSize: 16, color: 'var(--fg2)', lineHeight: 1.7, maxWidth: 480, margin: '0 auto' }}>
-          Planes flexibles para organizaciones de cualquier tamaño.
-          Sin contratos largos, sin letra chica. Los primeros 30 días son gratis.
-        </p>
-      </header>
 
-      {/* ── TARJETAS ── */}
-      <section id="planes" style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: 20, maxWidth: 1040,
-        margin: '0 auto', padding: '0 48px 96px',
-      }} className="pyc-planes-grid">
+        {/* Banner Trial */}
+        <div className="bg-[#121620] border border-[#e5b32a]/35 rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-[#e5b32a]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#e5b32a]" />
+              <span>Promoción Trial · Webpay Verificado</span>
+            </div>
+            <h2 className="text-base font-semibold text-white">Prueba gratis por 30 días</h2>
+            <p className="text-xs text-slate-400 max-w-xl">
+              Valida tu medio de pago con Webpay Plus ($50 CLP simbólicos reembolsables). Incluye 1 administrador único, hasta 20 socios y módulos esenciales.
+            </p>
+          </div>
+          <button
+            onClick={() => abrirCheckout('trial')}
+            className="px-5 py-2.5 rounded-lg bg-[#e5b32a]/15 hover:bg-[#e5b32a]/25 text-[#e5b32a] border border-[#e5b32a]/40 font-semibold text-xs transition-colors shrink-0 cursor-pointer"
+          >
+            Activar Trial con Webpay
+          </button>
+        </div>
 
-        {PLANES.map(plan => (
-          <div key={plan.id} style={{
-            background: plan.destacado ? 'var(--bg2)' : 'var(--bg)',
-            border: plan.destacado ? '1px solid var(--gold-line)' : '1px solid var(--border)',
-            borderRadius: 18, padding: '32px 28px',
-            display: 'flex', flexDirection: 'column',
-            position: 'relative',
-          }}>
+        {/* 3 Niveles */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+          {niveles.map((plan) => {
+            const precioMostrado =
+              ciclo === 'anual' ? plan.precioMensual * 10 : plan.precioMensual;
+            const ahorroAnual = plan.precioMensual * 2;
 
-            {plan.destacado && (
-              <div style={{
-                position: 'absolute', top: -13, left: '50%',
-                transform: 'translateX(-50%)',
-                background: 'var(--gold)', color: '#000',
-                fontSize: 11, fontWeight: 700, letterSpacing: '0.05em',
-                padding: '4px 14px', borderRadius: 100, whiteSpace: 'nowrap',
-              }}>
-                Más popular
+            return (
+              <div
+                key={plan.id}
+                className={`relative rounded-2xl p-6 flex flex-col justify-between border transition-colors ${
+                  plan.destacado
+                    ? 'bg-[#131722] border-[#e5b32a]/60 shadow-2xl shadow-[#e5b32a]/5'
+                    : 'bg-[#10131b] border-white/[0.08]'
+                }`}
+              >
+                {plan.destacado && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full bg-[#e5b32a] text-slate-950 text-[10px] font-bold">
+                    Más popular
+                  </span>
+                )}
+
+                <div className="space-y-5">
+                  <div>
+                    <h3 className="text-base font-semibold text-white">{plan.nombre}</h3>
+                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">{plan.descripcion}</p>
+                  </div>
+
+                  <div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-3xl font-bold text-white tracking-tight">
+                        ${precioMostrado.toLocaleString('es-CL')}
+                      </span>
+                      <span className="text-xs text-slate-400">
+                        /{ciclo === 'anual' ? 'año' : 'mes'}
+                      </span>
+                    </div>
+                    {ciclo === 'anual' && (
+                      <p className="text-[11px] text-emerald-400 mt-1">
+                        Ahorras ${ahorroAnual.toLocaleString('es-CL')} al año
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => abrirCheckout(plan.id)}
+                    className={`w-full py-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                      plan.destacado
+                        ? 'bg-[#e5b32a] hover:bg-[#f0c038] text-slate-950'
+                        : 'bg-white/[0.05] hover:bg-white/[0.1] text-white border border-white/10'
+                    }`}
+                  >
+                    Pagar {plan.nombre} con Webpay
+                  </button>
+
+                  <ul className="space-y-2.5 pt-2 border-t border-white/[0.06]">
+                    {plan.features.map((feat) => (
+                      <li key={feat} className="flex items-start gap-2 text-xs text-slate-300">
+                        <span className="text-[#e5b32a] mt-0.5">✓</span>
+                        <span>{feat}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="pt-5 mt-5 border-t border-white/[0.06]">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Módulos incluidos</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(plan.modulos_activos)
+                      .filter(([, activo]) => activo)
+                      .map(([key]) => (
+                        <span
+                          key={key}
+                          className="text-[10px] px-2 py-0.5 rounded bg-white/[0.04] text-slate-300 border border-white/[0.06]"
+                        >
+                          {ETIQUETAS_MODULOS[key] || key}
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="text-center pt-4">
+          <Link href="/validar-sindicato" className="text-xs text-slate-400 hover:text-[#e5b32a] transition-colors">
+            ¿Ya recibiste tus credenciales en Gmail? Activar sindicato aquí →
+          </Link>
+        </div>
+      </main>
+
+      {/* Modal Checkout conectado a Webpay Plus */}
+      {planElegido && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => !redirigiendoWebpay && setPlanElegido(null)}
+        >
+          <div
+            className="w-full max-w-lg bg-[#11141d] border border-white/10 rounded-2xl p-6 space-y-5 shadow-2xl my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-white/[0.07] pb-4">
+              <div>
+                <span className="text-[10px] font-mono uppercase text-[#e5b32a]">
+                  Orden vía Webpay Plus (Transbank)
+                </span>
+                <h3 className="text-base font-semibold text-white mt-0.5">
+                  {planElegido.nombre} —{' '}
+                  {planElegido.esTrial
+                    ? '$50 validación ($0 mensual / 30 días)'
+                    : `$${calcularMontoPlan(planElegido).toLocaleString('es-CL')} CLP (${ciclo})`}
+                </h3>
+              </div>
+              <button
+                onClick={() => !redirigiendoWebpay && setPlanElegido(null)}
+                className="text-slate-400 hover:text-white text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {errorMsg && (
+              <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                {errorMsg}
               </div>
             )}
 
-            {/* Nombre */}
-            <div style={{
-              fontSize: 17, fontWeight: 800,
-              color: plan.destacado ? 'var(--gold)' : 'var(--fg)',
-              marginBottom: 8,
-              fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-            }}>
-              {plan.nombre}
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--fg2)', lineHeight: 1.6, marginBottom: 24 }}>
-              {plan.descripcion}
-            </p>
+            <form onSubmit={handlePagarConWebpay} className="space-y-3 text-xs">
+              <p className="text-[11px] text-slate-400 font-medium">1. Administrador / Presidente</p>
+              <input
+                required
+                placeholder="Nombre completo"
+                value={form.usuario_nombre}
+                onChange={(e) => setForm({ ...form, usuario_nombre: e.target.value })}
+                className="w-full bg-[#090b10] border border-white/10 rounded-lg px-3.5 py-2.5 text-white focus:outline-none focus:border-[#e5b32a]"
+              />
+              <div className="grid grid-cols-2 gap-2.5">
+                <input
+                  required
+                  maxLength={12}
+                  placeholder="RUT (12.345.678-9)"
+                  value={form.usuario_rut}
+                  onChange={(e) => setForm({ ...form, usuario_rut: formatearRut(e.target.value) })}
+                  className="w-full bg-[#090b10] border border-white/10 rounded-lg px-3.5 py-2.5 text-white focus:outline-none focus:border-[#e5b32a]"
+                />
+                <input
+                  required
+                  type="email"
+                  placeholder="Correo Gmail"
+                  value={form.usuario_email}
+                  onChange={(e) => setForm({ ...form, usuario_email: e.target.value })}
+                  className="w-full bg-[#090b10] border border-white/10 rounded-lg px-3.5 py-2.5 text-white focus:outline-none focus:border-[#e5b32a]"
+                />
+              </div>
 
-            {/* Precio */}
-            <div style={{ marginBottom: 24 }}>
-              <span style={{
-                fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-                fontSize: 36, fontWeight: 800,
-                color: 'var(--fg)', letterSpacing: '-0.03em', lineHeight: 1,
-              }}>
-                {fmt(plan.mensual)}
-              </span>
-              <span style={{ fontSize: 13, color: 'var(--fg3)', marginLeft: 6 }}>/mes</span>
-            </div>
+              <p className="text-[11px] text-slate-400 font-medium pt-1">2. Organización Sindical</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <input
+                  required
+                  placeholder="Nombre del sindicato"
+                  value={form.nombre_sindicato}
+                  onChange={(e) => setForm({ ...form, nombre_sindicato: e.target.value })}
+                  className="w-full bg-[#090b10] border border-white/10 rounded-lg px-3.5 py-2.5 text-white focus:outline-none focus:border-[#e5b32a]"
+                />
+                <input
+                  required
+                  maxLength={12}
+                  placeholder="RUT Sindicato (76.123.456-K)"
+                  value={form.rut_sindicato}
+                  onChange={(e) => setForm({ ...form, rut_sindicato: formatearRut(e.target.value) })}
+                  className="w-full bg-[#090b10] border border-white/10 rounded-lg px-3.5 py-2.5 text-white focus:outline-none focus:border-[#e5b32a]"
+                />
+              </div>
 
-            {/* CTA */}
-            <button
-              onClick={() => setModalPlan(plan)}
-              style={{
-                display: 'block', width: '100%', textAlign: 'center',
-                padding: '12px 20px', borderRadius: 10,
-                fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-                fontWeight: 700, fontSize: 14, cursor: 'pointer',
-                marginBottom: 24,
-                background: plan.destacado ? 'var(--gold)' : 'transparent',
-                color: plan.destacado ? '#000' : 'var(--fg2)',
-                border: plan.destacado ? 'none' : '1px solid var(--border)',
-                transition: 'background 0.15s, border-color 0.15s',
-              }}
-            >
-              {plan.cta}
-            </button>
+              {/* Aviso Pasarela Webpay Plus */}
+              <div className="p-3.5 rounded-xl bg-[#090b10] border border-white/[0.08] space-y-1.5 mt-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-white">Pasarela Segura Webpay Plus</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400">
+                    Transbank API
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Al continuar serás redirigido a <strong className="text-slate-200">Webpay Plus</strong> para pagar con Redcompra, Débito, Crédito o Prepago. Al aprobarse, tu orden llegará al SuperAdmin para emitir tus credenciales por Gmail.
+                </p>
+              </div>
 
-            <div style={{ height: 1, background: 'var(--border)', marginBottom: 22 }} />
-
-            {/* Features */}
-            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-              {plan.features.map(f => (
-                <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: 'var(--fg2)' }}>
-                  <IconCheck />{f}
-                </li>
-              ))}
-              {plan.noIncluye.map(f => (
-                <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: 'var(--fg3)' }}>
-                  <IconX />{f}
-                </li>
-              ))}
-            </ul>
+              <button
+                type="submit"
+                disabled={redirigiendoWebpay}
+                className="w-full py-3 mt-2 rounded-lg bg-[#e5b32a] hover:bg-[#f0c038] disabled:opacity-50 text-slate-950 font-semibold transition-colors cursor-pointer"
+              >
+                {redirigiendoWebpay
+                  ? 'Conectando con Webpay Plus...'
+                  : `Ir a Webpay Plus ($${calcularMontoPlan(planElegido).toLocaleString('es-CL')} CLP) →`}
+              </button>
+            </form>
           </div>
-        ))}
-      </section>
-
-      <div className="pyc-divider" />
-
-      {/* ── PREGUNTAS FRECUENTES ── */}
-      <section style={{ maxWidth: 680, margin: '0 auto', padding: '88px 48px' }}>
-        <div className="pyc-section-tag" style={{ marginBottom: 12 }}>Preguntas frecuentes</div>
-        <h2 style={{
-          fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-          fontSize: 'clamp(22px, 3.5vw, 32px)',
-          fontWeight: 800, color: 'var(--fg)',
-          letterSpacing: '-0.02em', marginBottom: 48,
-        }}>
-          Todo lo que necesitas saber
-        </h2>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {FAQS.map((faq, i) => (
-            <div key={i} style={{ borderBottom: '1px solid var(--border)', paddingBottom: 24, marginBottom: 24 }}>
-              <h3 style={{
-                fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-                fontSize: 15, fontWeight: 700, color: 'var(--fg)',
-                marginBottom: 8, letterSpacing: '-0.01em',
-              }}>
-                {faq.q}
-              </h3>
-              <p style={{ fontSize: 14, color: 'var(--fg2)', lineHeight: 1.7 }}>{faq.a}</p>
-            </div>
-          ))}
         </div>
-      </section>
-
-      <div className="pyc-divider" />
-
-      {/* ── CTA FINAL ── */}
-      <div className="pyc-footer-cta">
-        <h2>¿Listo para digitalizar tu sindicato?</h2>
-        <p>Empieza gratis por 30 días, sin tarjeta de crédito.</p>
-        <Link href="/contacto" className="pyc-btn-primary">Contactar al equipo</Link>
-      </div>
-
-      {/* ── FOOTER ── */}
-      <div className="pyc-footer-bottom">
-        <span>© 2026 Sindicato PYC. Todos los derechos reservados.</span>
-        <span>Desarrollado por equipo Capstone · Duoc UC</span>
-      </div>
-
-      {/* ── MODAL ── */}
-      {modalPlan && <ModalCompra plan={modalPlan} onClose={() => setModalPlan(null)} />}
-
-      {/* Responsive */}
-      <style>{`
-        @media (max-width: 700px) {
-          .pyc-modal-grid { grid-template-columns: 1fr !important; }
-          .pyc-modal-grid > div:first-child { display: none; }
-        }
-      `}</style>
-
+      )}
     </div>
+  );
+}
+
+export default function PlanesPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0b0d12]" />}>
+      <PlanesContent />
+    </Suspense>
   );
 }
