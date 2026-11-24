@@ -37,6 +37,7 @@ const MODULOS_BASE: Record<string, { label: string; desc: string }> = {
 
 type AdminTab =
   | 'postulaciones'
+  | 'tickets'
   | 'estadisticas'
   | 'asambleas'
   | 'notificaciones'
@@ -60,6 +61,10 @@ function esCargoDirectivo(rol?: string | null): boolean {
   return ['admin', 'administrador', 'directiva', 'presidente'].includes(
     String(rol || '').trim().toLowerCase()
   );
+}
+
+function normalizarRut(raw?: string | null): string {
+  return String(raw || '').replace(/[^0-9kK]/g, '').toUpperCase();
 }
 
 function formatRutConPuntosYGuion(raw?: string | null): string {
@@ -120,6 +125,7 @@ export default function AdminPanel() {
 
   // Datos del sindicato
   const [postulaciones, setPostulaciones] = useState<any[]>([]);
+  const [tickets, setTickets] = useState<any[]>([]);
   const [socios, setSocios] = useState<any[]>([]);
   const [historialAsambleas, setHistorialAsambleas] = useState<any[]>([]);
   const [asistencias, setAsistencias] = useState<any[]>([]);
@@ -137,6 +143,19 @@ export default function AdminPanel() {
   } | null>(null);
   const [credSocioAprobado, setCredSocioAprobado] = useState<CredencialesSocioAprobado | null>(null);
   const [postARechazar, setPostARechazar] = useState<any>(null);
+
+  // Estados de Tickets de Soporte
+  const [filtroTicket, setFiltroTicket] = useState<'Todos' | 'Pendientes' | 'En Revisión' | 'Resueltos'>('Todos');
+  const [busquedaTicket, setBusquedaTicket] = useState('');
+  const [ticketEdit, setTicketEdit] = useState<any>(null);
+  const [ticketAEliminar, setTicketAEliminar] = useState<any>(null);
+  const [guardandoTicket, setGuardandoTicket] = useState(false);
+  const [formTicket, setFormTicket] = useState({
+    estado: 'En Revisión',
+    respuesta_admin: '',
+    correo_destino: '',
+    enviar_correo: true,
+  });
 
   // Modal Agregar Postulante
   const [modalNuevoPostulante, setModalNuevoPostulante] = useState(false);
@@ -208,10 +227,15 @@ export default function AdminPanel() {
     setActualizando(true);
     try {
       const supabase = createClient();
-      const [sindRes, postRes, usrRes, histRes, asistRes, comRes] = await Promise.all([
+      const [sindRes, postRes, ticketsRes, usrRes, histRes, asistRes, comRes] = await Promise.all([
         supabase.from('sindicatos').select('*').eq('id', targetId).maybeSingle(),
         supabase
           .from('postulaciones')
+          .select('*')
+          .eq('sindicato_id', targetId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('tickets_soporte')
           .select('*')
           .eq('sindicato_id', targetId)
           .order('created_at', { ascending: false }),
@@ -266,6 +290,7 @@ export default function AdminPanel() {
       }
 
       if (Array.isArray(postRes.data)) setPostulaciones(postRes.data);
+      if (Array.isArray(ticketsRes.data)) setTickets(ticketsRes.data);
       if (Array.isArray(usrRes.data)) setSocios(usrRes.data);
       if (Array.isArray(histRes.data)) setHistorialAsambleas(histRes.data);
       if (Array.isArray(asistRes.data)) setAsistencias(asistRes.data);
@@ -353,6 +378,11 @@ export default function AdminPanel() {
       )
       .on(
         'postgres_changes',
+        { event: '*', schema: 'public', table: 'tickets_soporte', filter: `sindicato_id=eq.${idSindicatoActual}` },
+        () => cargarDatosSindicato(idSindicatoActual)
+      )
+      .on(
+        'postgres_changes',
         { event: '*', schema: 'public', table: 'profiles', filter: `sindicato_id=eq.${idSindicatoActual}` },
         () => cargarDatosSindicato(idSindicatoActual)
       )
@@ -384,6 +414,155 @@ export default function AdminPanel() {
     setErrorPostulacion(null);
     await cargarDatosSindicato(nuevoId);
     notificar(`Cambiado al sindicato #${nuevoId}.`);
+  };
+
+  // --- HELPER: RESOLVER DATOS DEL SOCIO PARA UN TICKET ---
+  const resolverDatosSocioTicket = useCallback(
+    (ticket: any) => {
+      const rawId = String(ticket?.usuario_rut || '').trim();
+      const esCorreo = rawId.includes('@');
+      const rutBuscado = !esCorreo ? normalizarRut(rawId) : '';
+
+      const matchSocio = socios.find((s) => {
+        if (esCorreo && s.email) {
+          return String(s.email).trim().toLowerCase() === rawId.toLowerCase();
+        }
+        if (rutBuscado && s.rut) {
+          return normalizarRut(s.rut) === rutBuscado;
+        }
+        return false;
+      });
+
+      const emailFinal = esCorreo ? rawId.toLowerCase() : String(matchSocio?.email || '').trim().toLowerCase();
+      const nombreFinal =
+        matchSocio?.full_name || (emailFinal ? emailFinal.split('@')[0] : 'Socio/a');
+      const rutFinal = matchSocio?.rut
+        ? formatRutConPuntosYGuion(matchSocio.rut)
+        : !esCorreo && rawId
+        ? formatRutConPuntosYGuion(rawId)
+        : 'No informado';
+
+      return { nombre: nombreFinal, email: emailFinal, rut: rutFinal };
+    },
+    [socios]
+  );
+
+  // --- GESTIÓN DE TICKETS (RESOLVER + ENVIAR CORREO VÍA BREVO /api/correos) ---
+  const abrirModalTicket = (ticket: any) => {
+    const infoSocio = resolverDatosSocioTicket(ticket);
+    setTicketEdit(ticket);
+    setFormTicket({
+      estado: ticket.estado || 'En Revisión',
+      respuesta_admin: ticket.respuesta_admin || '',
+      correo_destino: infoSocio.email,
+      enviar_correo: true,
+    });
+  };
+
+  const handleGuardarResolucionTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ticketEdit || !idSindicatoActual) return;
+
+    setGuardandoTicket(true);
+    try {
+      const supabase = createClient();
+      const respuestaLimpia = formTicket.respuesta_admin.trim();
+      const correoDestino = formTicket.correo_destino.trim().toLowerCase();
+
+      // 1. Actualizar estado y respuesta en Supabase (trigger de BD maneja fecha_cierre)
+      const { error: dbErr } = await supabase
+        .from('tickets_soporte')
+        .update({
+          estado: formTicket.estado,
+          respuesta_admin: respuestaLimpia || null,
+        })
+        .eq('id', ticketEdit.id)
+        .eq('sindicato_id', idSindicatoActual);
+
+      if (dbErr) throw dbErr;
+
+      // 2. Despachar correo de resolución al socio vía Brevo (/api/correos)
+      let avisoFinal = `Ticket #${ticketEdit.id} actualizado a "${formTicket.estado}".`;
+      let tipoAviso: 'ok' | 'err' = 'ok';
+
+      if (formTicket.enviar_correo) {
+        if (!respuestaLimpia) {
+          avisoFinal = `Ticket #${ticketEdit.id} actualizado en BD (no se envió correo porque la respuesta está vacía).`;
+        } else if (!correoDestino || !correoDestino.includes('@')) {
+          avisoFinal = `Ticket #${ticketEdit.id} actualizado en BD, pero falta un correo válido del socio para enviar la notificación.`;
+          tipoAviso = 'err';
+        } else {
+          const infoSocio = resolverDatosSocioTicket(ticketEdit);
+          const sindNombre = sindicatoInfo?.nombre || `Sindicato #${idSindicatoActual}`;
+
+          try {
+            const resCorreo = await fetch('/api/correos', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                tipo: 'ticket',
+                to_email: correoDestino,
+                to_name: infoSocio.nombre,
+                sindicato_nombre: sindNombre,
+                socio_rut: infoSocio.rut,
+                ticket_id: ticketEdit.id,
+                ticket_asunto: `Resolución de tu Ticket #${ticketEdit.id}: ${ticketEdit.asunto || 'Soporte'}`,
+                ticket_categoria: 'Resolución de Directiva',
+                ticket_prioridad: 'Normal',
+                ticket_estado: formTicket.estado,
+                ticket_mensaje:
+                  `La directiva de ${sindNombre} (atendido por ${adminNombre}) ha respondido tu solicitud:\n\n` +
+                  `${respuestaLimpia}\n\n` +
+                  `Estado actual del ticket: ${formTicket.estado}.`,
+              }),
+            });
+
+            const dataCorreo = await resCorreo.json().catch(() => ({}));
+            if (resCorreo.ok && dataCorreo?.ok) {
+              avisoFinal = `Ticket #${ticketEdit.id} actualizado y correo de resolución enviado a ${correoDestino}.`;
+            } else {
+              avisoFinal = `Ticket #${ticketEdit.id} guardado en BD, pero falló el envío por Brevo: ${
+                dataCorreo?.error || 'Revisa BREVO_API_KEY y BREVO_SENDER_EMAIL.'
+              }`;
+              tipoAviso = 'err';
+            }
+          } catch (mailErr: any) {
+            avisoFinal = `Ticket #${ticketEdit.id} guardado en BD, pero hubo un error de red enviando el correo: ${
+              mailErr?.message || 'Error desconocido'
+            }`;
+            tipoAviso = 'err';
+          }
+        }
+      }
+
+      setTicketEdit(null);
+      await cargarDatosSindicato(idSindicatoActual);
+      notificar(avisoFinal, tipoAviso);
+    } catch (err: any) {
+      notificar(err?.message || 'No se pudo actualizar el ticket.', 'err');
+    } finally {
+      setGuardandoTicket(false);
+    }
+  };
+
+  const confirmarEliminarTicket = async () => {
+    if (!ticketAEliminar || !idSindicatoActual) return;
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('tickets_soporte')
+        .delete()
+        .eq('id', ticketAEliminar.id)
+        .eq('sindicato_id', idSindicatoActual);
+      if (error) throw error;
+
+      const idEliminado = ticketAEliminar.id;
+      setTicketAEliminar(null);
+      await cargarDatosSindicato(idSindicatoActual);
+      notificar(`Ticket #${idEliminado} eliminado definitivamente.`);
+    } catch (err: any) {
+      notificar(err?.message || 'No se pudo eliminar el ticket.', 'err');
+    }
   };
 
   // --- APROBAR POSTULACIÓN (RPC BCRYPT 6 DÍGITOS + PLANTILLA EMAILJS DEDICADA SOCIOS) ---
@@ -914,7 +1093,7 @@ export default function AdminPanel() {
     );
   }
 
-  // Contadores y filtros
+  // Contadores y filtros de Postulaciones
   const postPendientes = postulaciones.filter(
     (p) => !p.estado || p.estado === 'Pendiente' || p.estado === 'En Revisión'
   );
@@ -935,6 +1114,34 @@ export default function AdminPanel() {
       String(p.full_name || '').toLowerCase().includes(q) ||
       String(p.rut || '').toLowerCase().includes(q) ||
       String(p.email || '').toLowerCase().includes(q);
+
+    return matchEstado && matchTexto;
+  });
+
+  // Contadores y filtros de Tickets
+  const ticketsPendientes = tickets.filter((t) => !t.estado || t.estado === 'Pendiente');
+  const ticketsEnRevision = tickets.filter((t) => t.estado === 'En Revisión');
+  const ticketsResueltos = tickets.filter(
+    (t) => t.estado === 'Resuelto' || t.estado === 'Finalizado'
+  );
+  const ticketsAbiertosCount = ticketsPendientes.length + ticketsEnRevision.length;
+
+  const ticketsFiltrados = tickets.filter((t) => {
+    const est = String(t.estado || 'Pendiente');
+    const matchEstado =
+      filtroTicket === 'Todos' ||
+      (filtroTicket === 'Pendientes' && est === 'Pendiente') ||
+      (filtroTicket === 'En Revisión' && est === 'En Revisión') ||
+      (filtroTicket === 'Resueltos' && (est === 'Resuelto' || est === 'Finalizado'));
+
+    const q = busquedaTicket.toLowerCase().trim();
+    const matchTexto =
+      !q ||
+      String(t.id || '').includes(q) ||
+      String(t.asunto || '').toLowerCase().includes(q) ||
+      String(t.mensaje || '').toLowerCase().includes(q) ||
+      String(t.usuario_rut || '').toLowerCase().includes(q) ||
+      String(t.respuesta_admin || '').toLowerCase().includes(q);
 
     return matchEstado && matchTexto;
   });
@@ -970,6 +1177,12 @@ export default function AdminPanel() {
       titulo: 'Postulaciones',
       subtitulo: 'Revisar y aprobar ingresos',
       badge: postPendientes.length > 0 ? postPendientes.length : undefined,
+    },
+    {
+      id: 'tickets',
+      titulo: 'Tickets de Soporte',
+      subtitulo: 'Resolver y notificar socios',
+      badge: ticketsAbiertosCount > 0 ? ticketsAbiertosCount : undefined,
     },
     {
       id: 'estadisticas',
@@ -1472,7 +1685,193 @@ export default function AdminPanel() {
             )}
 
             {/* ==============================================================
-                TAB 2: RESUMEN, QUÓRUM (FIX MIGRACIÓN 001) Y TENDENCIAS (RECHARTS)
+                TAB 2: TICKETS DE SOPORTE (GESTIÓN Y CORREO DE RESOLUCIÓN VÍA BREVO)
+               ============================================================== */}
+            {activeTab === 'tickets' && (
+              <div className="space-y-6">
+                <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">Tickets de Soporte</h2>
+                    <p className="text-sm text-slate-300 mt-1">
+                      Revisa las consultas de <strong className="text-white">{sindicatoNombreActual}</strong>, cambia su estado y envía el correo de resolución al socio al instante vía Brevo.
+                    </p>
+                  </div>
+                  <Link
+                    href="/dashboard/soporte"
+                    className="px-4 py-2.5 rounded-xl bg-[#161c2a] hover:bg-[#1e2638] border border-[#2c354b] text-slate-200 text-xs font-semibold shrink-0"
+                  >
+                    Ver módulo Soporte →
+                  </Link>
+                </header>
+
+                {/* Filtros y buscador */}
+                <div className="flex flex-col md:flex-row gap-3 justify-between">
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        { id: 'Todos', count: tickets.length },
+                        { id: 'Pendientes', count: ticketsPendientes.length },
+                        { id: 'En Revisión', count: ticketsEnRevision.length },
+                        { id: 'Resueltos', count: ticketsResueltos.length },
+                      ] as const
+                    ).map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setFiltroTicket(f.id)}
+                        className={`px-3.5 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                          filtroTicket === f.id
+                            ? 'bg-[#e5b32a] text-[#0b0e14] border-[#e5b32a]'
+                            : 'bg-[#121722] text-slate-300 border-[#252e42] hover:border-slate-500'
+                        }`}
+                      >
+                        {f.id} ({f.count})
+                      </button>
+                    ))}
+                  </div>
+
+                  <input
+                    type="text"
+                    value={busquedaTicket}
+                    onChange={(e) => setBusquedaTicket(e.target.value)}
+                    placeholder="Buscar por #ID, asunto, correo o mensaje..."
+                    className="w-full md:w-72 bg-[#121722] border border-[#2c354b] rounded-lg px-3.5 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-[#e5b32a]"
+                  />
+                </div>
+
+                {/* Listado de Tickets */}
+                <div className="space-y-4">
+                  {ticketsFiltrados.length === 0 ? (
+                    <div className="bg-[#121722] border border-[#252e42] rounded-2xl p-10 text-center space-y-2">
+                      <p className="text-base font-semibold text-white">No hay tickets en esta vista</p>
+                      <p className="text-sm text-slate-400">
+                        Cuando un socio ingrese una consulta desde Soporte aparecerá aquí en tiempo real.
+                      </p>
+                    </div>
+                  ) : (
+                    ticketsFiltrados.map((ticket) => {
+                      const est = String(ticket.estado || 'Pendiente');
+                      const esResuelto = est === 'Resuelto' || est === 'Finalizado';
+                      const esRevision = est === 'En Revisión';
+                      const infoSocio = resolverDatosSocioTicket(ticket);
+
+                      return (
+                        <article
+                          key={ticket.id}
+                          className="bg-[#121722] border border-[#252e42] rounded-2xl p-5 sm:p-6 space-y-4"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-[#1c2334] text-[#e5b32a]">
+                                  TICKET #{ticket.id}
+                                </span>
+                                <span className="text-xs text-slate-400 font-mono">
+                                  {ticket.created_at
+                                    ? new Date(ticket.created_at).toLocaleString('es-CL', {
+                                        day: '2-digit',
+                                        month: '2-digit',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })
+                                    : ''}
+                                </span>
+                              </div>
+                              <h3 className="text-base sm:text-lg font-bold text-white leading-snug">
+                                {ticket.asunto || 'Sin asunto'}
+                              </h3>
+                            </div>
+
+                            <span
+                              className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold border shrink-0 ${
+                                esResuelto
+                                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                                  : esRevision
+                                  ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                                  : 'bg-sky-500/15 text-sky-300 border-sky-500/35'
+                              }`}
+                            >
+                              <span
+                                className={`w-2 h-2 rounded-full ${
+                                  esResuelto
+                                    ? 'bg-emerald-400'
+                                    : esRevision
+                                    ? 'bg-amber-400'
+                                    : 'bg-sky-400'
+                                }`}
+                              />
+                              {est}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                            <div className="bg-[#0e121b] border border-[#1f2637] rounded-xl p-3.5">
+                              <p className="text-xs text-slate-400 mb-1">Socio / Contacto</p>
+                              <p className="font-semibold text-white">{infoSocio.nombre}</p>
+                              <p className="text-xs font-mono text-slate-300 break-all mt-0.5">
+                                {infoSocio.email || ticket.usuario_rut || 'Sin correo'}
+                              </p>
+                            </div>
+                            <div className="bg-[#0e121b] border border-[#1f2637] rounded-xl p-3.5">
+                              <p className="text-xs text-slate-400 mb-1">RUT y Cierre</p>
+                              <p className="font-mono text-slate-100">{infoSocio.rut}</p>
+                              <p className="text-xs text-slate-400 mt-0.5">
+                                {ticket.fecha_cierre
+                                  ? `Cerrado: ${new Date(ticket.fecha_cierre).toLocaleDateString('es-CL')}`
+                                  : 'Caso abierto'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="bg-[#0e121b] border border-[#1f2637] rounded-xl p-4">
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                              Detalle enviado por el socio
+                            </p>
+                            <p className="text-sm text-slate-200 whitespace-pre-line leading-relaxed">
+                              {ticket.mensaje || 'Sin detalle.'}
+                            </p>
+                          </div>
+
+                          {ticket.respuesta_admin && (
+                            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4">
+                              <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300 mb-1.5">
+                                Resolución registrada por Directiva
+                              </p>
+                              <p className="text-sm text-emerald-100 whitespace-pre-line leading-relaxed">
+                                {ticket.respuesta_admin}
+                              </p>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => abrirModalTicket(ticket)}
+                              className="px-4 py-2.5 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] font-bold text-sm transition-colors cursor-pointer"
+                            >
+                              {ticket.respuesta_admin
+                                ? 'Editar y Reenviar Resolución'
+                                : 'Resolver y Enviar Correo'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setTicketAEliminar(ticket)}
+                              className="px-4 py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-200 border border-rose-500/40 font-semibold text-sm transition-colors cursor-pointer"
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ==============================================================
+                TAB 3: RESUMEN, QUÓRUM (FIX MIGRACIÓN 001) Y TENDENCIAS (RECHARTS)
                ============================================================== */}
             {activeTab === 'estadisticas' && (
               <div className="space-y-6">
@@ -1530,7 +1929,7 @@ export default function AdminPanel() {
                       {modulosEncendidosCount}/{totalModulosCount}
                     </p>
                     <p className="text-xs text-slate-400 mt-1">
-                      {comunicados.length} avisos publicados
+                      {ticketsAbiertosCount} ticket(s) abierto(s)
                     </p>
                   </div>
                 </div>
@@ -1611,7 +2010,7 @@ export default function AdminPanel() {
             )}
 
             {/* ==============================================================
-                TAB 3: ASAMBLEAS Y CONTROL QR (CON FIX DE ASAMBLEA_ID)
+                TAB 4: ASAMBLEAS Y CONTROL QR (CON FIX DE ASAMBLEA_ID)
                ============================================================== */}
             {activeTab === 'asambleas' && (
               <div className="space-y-6">
@@ -1750,7 +2149,7 @@ export default function AdminPanel() {
             )}
 
             {/* ==============================================================
-                TAB 4: ENVIAR AVISOS A LOS SOCIOS
+                TAB 5: ENVIAR AVISOS A LOS SOCIOS
                ============================================================== */}
             {activeTab === 'notificaciones' && (
               <div className="space-y-6">
@@ -1838,7 +2237,7 @@ export default function AdminPanel() {
             )}
 
             {/* ==============================================================
-                TAB 5: LISTA DE SOCIOS
+                TAB 6: LISTA DE SOCIOS
                ============================================================== */}
             {activeTab === 'socios' && (
               <div className="space-y-6">
@@ -1930,7 +2329,7 @@ export default function AdminPanel() {
             )}
 
             {/* ==============================================================
-                TAB 6: SECCIONES VISIBLES (SOFT DELETE)
+                TAB 7: SECCIONES VISIBLES (SOFT DELETE)
                ============================================================== */}
             {activeTab === 'modulos' && (
               <div className="space-y-6">
@@ -2004,7 +2403,7 @@ export default function AdminPanel() {
             )}
 
             {/* ==============================================================
-                TAB 7: APARIENCIA DEL PORTAL (JSONB)
+                TAB 8: APARIENCIA DEL PORTAL (JSONB)
                ============================================================== */}
             {activeTab === 'tema' && (
               <div className="space-y-6">
@@ -2405,6 +2804,164 @@ export default function AdminPanel() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL 6: GESTIONAR Y RESOLVER TICKET (BREVO) ================= */}
+      {ticketEdit && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setTicketEdit(null)}
+        >
+          <div
+            className="bg-[#121722] border border-[#2f3952] rounded-2xl w-full max-w-xl p-6 space-y-5 shadow-2xl my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-[#1f2637] pb-4">
+              <div>
+                <p className="text-xs font-mono font-bold text-[#e5b32a]">
+                  TICKET #{ticketEdit.id} · {sindicatoNombreActual}
+                </p>
+                <h3 className="text-lg font-bold text-white mt-0.5">
+                  {ticketEdit.asunto || 'Gestión de Ticket'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTicketEdit(null)}
+                className="text-slate-400 hover:text-white text-sm font-bold px-2 py-1 cursor-pointer"
+                aria-label="Cerrar modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-[#0e121b] border border-[#1f2637] rounded-xl p-4 space-y-1.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Mensaje original del socio
+              </p>
+              <p className="text-sm text-slate-200 whitespace-pre-line leading-relaxed max-h-36 overflow-y-auto">
+                {ticketEdit.mensaje || 'Sin mensaje.'}
+              </p>
+            </div>
+
+            <form onSubmit={handleGuardarResolucionTicket} className="space-y-4 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Estado del Ticket
+                  </label>
+                  <select
+                    value={formTicket.estado}
+                    onChange={(e) => setFormTicket({ ...formTicket, estado: e.target.value })}
+                    className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#e5b32a]"
+                  >
+                    <option value="Pendiente">Pendiente</option>
+                    <option value="En Revisión">En Revisión</option>
+                    <option value="Resuelto">Resuelto</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Correo del socio (notificación)
+                  </label>
+                  <input
+                    type="email"
+                    required={formTicket.enviar_correo && formTicket.respuesta_admin.trim().length > 0}
+                    value={formTicket.correo_destino}
+                    onChange={(e) =>
+                      setFormTicket({ ...formTicket, correo_destino: e.target.value })
+                    }
+                    placeholder="socio@correo.cl"
+                    className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#e5b32a]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Resolución / Respuesta de la Directiva
+                </label>
+                <textarea
+                  rows={4}
+                  value={formTicket.respuesta_admin}
+                  onChange={(e) =>
+                    setFormTicket({ ...formTicket, respuesta_admin: e.target.value })
+                  }
+                  placeholder="Escribe aquí la respuesta o solución que verá el socio en su portal y en su correo..."
+                  className="w-full bg-[#0b0e14] border border-[#2c354b] rounded-xl px-3.5 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#e5b32a] resize-none"
+                />
+              </div>
+
+              <label className="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={formTicket.enviar_correo}
+                  onChange={(e) =>
+                    setFormTicket({ ...formTicket, enviar_correo: e.target.checked })
+                  }
+                  className="w-4 h-4 accent-[#e5b32a] rounded cursor-pointer"
+                />
+                <span>Enviar correo de resolución al socio automáticamente (vía Brevo)</span>
+              </label>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#1f2637]">
+                <button
+                  type="button"
+                  onClick={() => setTicketEdit(null)}
+                  className="px-4 py-2.5 rounded-xl bg-[#1c2334] text-slate-200 text-sm font-medium cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardandoTicket}
+                  className="px-5 py-2.5 rounded-xl bg-[#e5b32a] hover:bg-[#f0c038] text-[#0b0e14] text-sm font-bold cursor-pointer disabled:opacity-50"
+                >
+                  {guardandoTicket
+                    ? 'Guardando y enviando...'
+                    : formTicket.enviar_correo
+                    ? 'Guardar y Enviar Correo'
+                    : 'Guardar Cambios'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL 7: CONFIRMAR ELIMINAR TICKET ================= */}
+      {ticketAEliminar && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setTicketAEliminar(null)}
+        >
+          <div
+            className="bg-[#121722] border border-rose-500/40 rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-white">¿Eliminar ticket #{ticketAEliminar.id}?</h3>
+            <p className="text-sm text-slate-300">
+              Se eliminará definitivamente la solicitud <strong>{ticketAEliminar.asunto}</strong>. Esta acción no se puede deshacer.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setTicketAEliminar(null)}
+                className="px-4 py-2.5 rounded-xl bg-[#1c2334] text-slate-200 text-sm font-medium cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarEliminarTicket}
+                className="px-4 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-white text-sm font-bold cursor-pointer"
+              >
+                Sí, eliminar
+              </button>
+            </div>
           </div>
         </div>
       )}

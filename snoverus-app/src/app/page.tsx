@@ -7,7 +7,7 @@ import { createClient } from './lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import './landing.css';
 
-// ─── FORMATEADOR Y VALIDADOR ESTRICTO DE RUT CHILENO (PUNTOS + GUIÓN + MÓDULO 11) ─
+// ─── FORMATEADOR Y VALIDADOR DE FORMATO RUT (PUNTOS + GUIÓN, REALES Y PRUEBA) ─
 function formatRutWithDotsAndDash(value: string): string {
   const clean = value.replace(/[^0-9kK]/g, '').toUpperCase().slice(0, 9);
   if (clean.length <= 1) return clean;
@@ -22,23 +22,7 @@ function formatRutWithDotsAndDash(value: string): string {
 function isValidRut(rut: string): boolean {
   const clean = rut.replace(/[^0-9kK]/g, '').toUpperCase();
   if (clean.length < 8 || clean.length > 9) return false;
-
-  const body = clean.slice(0, -1);
-  const dv = clean.slice(-1);
-  if (!/^\d+$/.test(body)) return false;
-
-  let sum = 0;
-  let multiplier = 2;
-
-  for (let i = body.length - 1; i >= 0; i--) {
-    sum += parseInt(body[i], 10) * multiplier;
-    multiplier = multiplier === 7 ? 2 : multiplier + 1;
-  }
-
-  const mod = 11 - (sum % 11);
-  const expectedDv = mod === 11 ? '0' : mod === 10 ? 'K' : String(mod);
-
-  return dv === expectedDv;
+  return /^\d{7,8}[0-9K]$/.test(clean);
 }
 
 function isValidEmail(email: string): boolean {
@@ -208,7 +192,7 @@ const PILARES_DATA = [
     modulo: 'Catálogo de Convenios + Comprobantes Gmail',
     detalle:
       'Cada socio solicita sus descuentos con un clic y recibe un comprobante digital oficial directo en su correo electrónico.',
-    bullets: ['Canje en 1 clic por categoría', 'Comprobante automático vía EmailJS', 'Historial de uso por socio'],
+    bullets: ['Canje en 1 clic por categoría', 'Comprobante automático por correo', 'Historial de uso por socio'],
   },
   {
     id: 'legal',
@@ -590,28 +574,49 @@ function LandingPage() {
     }
   };
 
-  // Utilidad compartida para resolver RUT -> Correo en Supabase
+  // Utilidad compartida para resolver RUT -> Correo en Supabase (tolera cualquier formato guardado)
   const resolverCorreoDesdeRut = async (rutFormateadoInput: string): Promise<string | null> => {
     const cleanRut = rutFormateadoInput.replace(/[^0-9kK]/g, '').toUpperCase();
     if (cleanRut.length < 8) return null;
+
     const rutConGuion = `${cleanRut.slice(0, -1)}-${cleanRut.slice(-1)}`;
     const rutFormateado = formatRutWithDotsAndDash(cleanRut);
 
     const supabase = createClient();
 
+    // 1. Buscar vía RPC (limpio primero, luego con guion por compatibilidad)
     const { data: rpcEmail } = await supabase.rpc('get_email_por_rut', {
       p_rut: cleanRut,
     });
-    if (rpcEmail) return String(rpcEmail).toLowerCase();
+    if (rpcEmail) return String(rpcEmail).trim().toLowerCase();
+
+    const { data: rpcEmailGuion } = await supabase.rpc('get_email_por_rut', {
+      p_rut: rutConGuion,
+    });
+    if (rpcEmailGuion) return String(rpcEmailGuion).trim().toLowerCase();
+
+    // 2. Fallback directo a profiles probando todos los formatos posibles (mayúscula/minúscula)
+    const variantes = Array.from(
+      new Set([
+        cleanRut,
+        cleanRut.toLowerCase(),
+        rutConGuion,
+        rutConGuion.toLowerCase(),
+        rutFormateado,
+        rutFormateado.toLowerCase(),
+      ])
+    );
+
+    const filtroOr = variantes.map((v) => `rut.eq.${v}`).join(',');
 
     const { data: matchProfile } = await supabase
       .from('profiles')
       .select('email')
-      .or(`rut.eq.${cleanRut},rut.eq.${rutConGuion},rut.eq.${rutFormateado}`)
+      .or(filtroOr)
       .limit(1)
       .maybeSingle();
 
-    return matchProfile?.email ? String(matchProfile.email).toLowerCase() : null;
+    return matchProfile?.email ? String(matchProfile.email).trim().toLowerCase() : null;
   };
 
   // Utilidad compartida para fijar sesión y redirigir según rol
@@ -768,14 +773,14 @@ function LandingPage() {
   const valRutValidoEnVivo = isValidRut(valRut);
   const valRutInvalidoEnVivo = valRutCleanLen >= 8 && !valRutValidoEnVivo;
 
-  // ── SUBMIT 1: INICIAR SESIÓN NORMAL (RUT MÓDULO 11 ESTRICTO) ──
+  // ── SUBMIT 1: INICIAR SESIÓN NORMAL (ACEPTA CUALQUIER RUT VALIDADO EN BD) ──
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSindicatoPendiente(false);
 
     if (!isValidRut(rut)) {
-      setErrorMsg('Ingresa un RUT chileno válido con puntos y guion (ej: 12.345.678-5).');
+      setErrorMsg('Ingresa un RUT con formato válido (ej: 12.345.678-5).');
       return;
     }
 
@@ -793,7 +798,7 @@ function LandingPage() {
     }
   };
 
-  // ── SUBMIT 2: VALIDAR CÓDIGO DE 6 DÍGITOS DEL SOCIO (RUT MÓDULO 11 O EMAIL) ──
+  // ── SUBMIT 2: VALIDAR CÓDIGO DE 6 DÍGITOS DEL SOCIO (RUT O EMAIL) ──
   const handleValidarCodigoSocio = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -802,7 +807,7 @@ function LandingPage() {
 
     if (valInputMode === 'rut') {
       if (!isValidRut(valRut)) {
-        setErrorMsg('Ingresa un RUT chileno válido con puntos y guion (ej: 12.345.678-5).');
+        setErrorMsg('Ingresa un RUT con formato válido (ej: 12.345.678-5).');
         return;
       }
     } else {
@@ -1215,7 +1220,7 @@ function LandingPage() {
                 {[
                   'Hasta 20 socios',
                   '1 Administrador único',
-                  'Beneficios + EmailJS',
+                  'Beneficios + Comprobantes',
                   'Credencial QR',
                   'Actas y Asistencia',
                 ].map((chip) => (
@@ -1602,7 +1607,7 @@ function LandingPage() {
       </div>
 
       {/* ══════════════════════════════════════════
-          DRAWER UNIFICADO: INICIAR SESIÓN + VALIDADOR DE SOCIOS (RUT MÓDULO 11)
+          DRAWER UNIFICADO: INICIAR SESIÓN + VALIDADOR DE SOCIOS
       ══════════════════════════════════════════ */}
       <AnimatePresence>
         {drawerOpen && (
@@ -1778,7 +1783,7 @@ function LandingPage() {
                           <span>RUT del Usuario</span>
                           {rutValidoEnVivo && (
                             <span style={{ fontSize: '0.68rem', color: '#34d399', fontWeight: 600 }}>
-                              ✓ RUT válido
+                              ✓ Formato listo
                             </span>
                           )}
                           {rutInvalidoEnVivo && (
@@ -2040,7 +2045,7 @@ function LandingPage() {
                       <p style={styles.drawerSubtitle}>
                         {valVieneDeLogin
                           ? 'Tus credenciales son correctas. Ingresa el código de 6 dígitos que llegó a tu correo y entrarás directo al sindicato.'
-                          : 'Ingresa tu RUT chileno con puntos y guion junto al código de 6 dígitos de tu Orden de Incorporación.'}
+                          : 'Ingresa tu RUT junto al código de 6 dígitos de tu Orden de Incorporación.'}
                       </p>
 
                       <form onSubmit={handleValidarCodigoSocio}>
@@ -2058,7 +2063,7 @@ function LandingPage() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             {valInputMode === 'rut' && valRutValidoEnVivo && (
                               <span style={{ fontSize: '0.68rem', color: '#34d399', fontWeight: 600 }}>
-                                ✓ RUT válido
+                                ✓ Formato listo
                               </span>
                             )}
                             {valInputMode === 'rut' && valRutInvalidoEnVivo && (
