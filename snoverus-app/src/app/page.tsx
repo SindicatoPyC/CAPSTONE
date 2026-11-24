@@ -660,9 +660,13 @@ function LandingPage() {
       );
     }
 
-    // 2. Si es un socio recién aprobado al que le falta ingresar su código de 6 dígitos:
-    //    Pasamos suavemente al validador integrado mostrando su RUT formateado
-    if (estadoUsuario === 'pendiente_correo' || profileData.email_verificado === false) {
+    // 2. Solo socios pendientes de verificación de correo requieren el código de 6 dígitos
+    //    (Admins que ya activaron su sindicato con PYC-XXXXXX entran directo a /dashboard/admin)
+    const requiereCodigoSocio =
+      estadoUsuario === 'pendiente_correo' ||
+      (rolUsuario === 'socio' && profileData.email_verificado === false);
+
+    if (requiereCodigoSocio) {
       await supabase.auth.signOut();
       setValInputMode('rut');
       setValRut(formatRutWithDotsAndDash(String(profileData.rut || rut)));
@@ -729,6 +733,8 @@ function LandingPage() {
 
     if (profileData.sindicato_id) {
       localStorage.setItem('sindicato_activo', String(profileData.sindicato_id));
+    } else {
+      localStorage.removeItem('sindicato_activo');
     }
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -1768,7 +1774,7 @@ function LandingPage() {
                       <p style={styles.drawerSubtitle}>
                         {redirectDestino
                           ? 'Inicia sesión para registrar tu asistencia.'
-                          : 'Ingresa con tu RUT y contraseña. Si es tu primer ingreso, te pediremos tu código de 6 dígitos aquí mismo.'}
+                          : 'Ingresa con tu RUT y contraseña. Si es tu primer ingreso como socio, te pediremos tu código de 6 dígitos aquí mismo.'}
                       </p>
 
                       <form onSubmit={handleLogin}>
