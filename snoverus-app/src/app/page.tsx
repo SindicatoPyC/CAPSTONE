@@ -7,6 +7,39 @@ import { createClient } from './lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import './landing.css';
 
+// ─── IDENTIDAD CORPORATIVA DE LA COMPAÑÍA SAAS ───────────────────────────────
+const BRAND_NAME = 'Snoverus';
+const BRAND_LEGAL = 'Snoverus Technologies SpA';
+const COOKIE_STORAGE_KEY = 'snoverus_cookie_consent_v1';
+
+function BrandMark({ size = 28 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 36 36"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      style={{ flexShrink: 0, display: 'block' }}
+    >
+      <defs>
+        <linearGradient id="snvGold" x1="2" y1="2" x2="34" y2="34" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#f3c64f" />
+          <stop offset="1" stopColor="#c9940a" />
+        </linearGradient>
+      </defs>
+      <rect width="36" height="36" rx="9" fill="url(#snvGold)" />
+      <path
+        d="M23.5 12.2C22.4 10.9 20.5 10.2 18.2 10.2C14.7 10.2 12.5 11.9 12.5 14.3C12.5 16.9 14.9 17.8 18.4 18.6C21.3 19.3 22.8 20.1 22.8 21.8C22.8 23.4 21.1 24.5 18.4 24.5C16.1 24.5 14.2 23.7 13 22.3"
+        stroke="#0b0d12"
+        strokeWidth="3.2"
+        strokeLinecap="round"
+      />
+      <circle cx="25.5" cy="11.5" r="2" fill="#0b0d12" />
+    </svg>
+  );
+}
+
 // ─── FORMATEADOR Y VALIDADOR DE FORMATO RUT (PUNTOS + GUIÓN, REALES Y PRUEBA) ─
 function formatRutWithDotsAndDash(value: string): string {
   const clean = value.replace(/[^0-9kK]/g, '').toUpperCase().slice(0, 9);
@@ -175,44 +208,60 @@ function useCityCanvas(canvasRef: React.RefObject<HTMLCanvasElement | null>) {
 // ─── DATOS INTERACTIVOS DE PILARES, TRIAL Y PLANES ───────────────────────────
 const PILARES_DATA = [
   {
-    id: 'representacion',
-    icon: '✊',
-    titulo: 'Representación colectiva',
-    desc: 'Negociamos en conjunto para obtener mejores condiciones laborales y salariales.',
-    modulo: 'Módulo de Negociación & Hitos',
+    id: 'arquitectura',
+    icon: '🛡️',
+    titulo: 'Arquitectura Multi-Tenant',
+    desc: 'Cada sindicato opera en su propia instancia lógica aislada con políticas RLS en base de datos.',
+    modulo: 'Motor Multi-Organización · RLS + JSONB',
     detalle:
-      'Seguimiento transparente de petitorios, mesas de trabajo y avances de negociación colectiva visibles en tiempo real para todos los socios.',
-    bullets: ['Línea de tiempo de hitos en vivo', 'Comunicados oficiales de directiva', 'Respaldo documental centralizado'],
+      'Una sola plataforma en la nube donde cada organización conserva su propio padrón, identidad visual en tiempo real, logotipo y módulos activos sin cruzar datos.',
+    bullets: [
+      'Aislamiento estricto por sindicato_id (PostgreSQL RLS)',
+      'Personalización de marca y tema visual en vivo',
+      'Control de acceso por rol: SuperAdmin, Directiva y Socio',
+    ],
   },
   {
     id: 'beneficios',
     icon: '🎁',
-    titulo: 'Beneficios exclusivos',
-    desc: 'Convenios en salud, educación y recreación para ti y tu grupo familiar.',
-    modulo: 'Catálogo de Convenios + Comprobantes Gmail',
+    titulo: 'Beneficios y comprobantes',
+    desc: 'Convenios en salud, educación y comercio con respaldo digital automático para cada socio.',
+    modulo: 'Catálogo de Convenios + Despacho Transaccional',
     detalle:
-      'Cada socio solicita sus descuentos con un clic y recibe un comprobante digital oficial directo en su correo electrónico.',
-    bullets: ['Canje en 1 clic por categoría', 'Comprobante automático por correo', 'Historial de uso por socio'],
+      'Cada trabajador solicita sus descuentos con un clic y recibe un comprobante digital oficial con folio directo en su correo electrónico.',
+    bullets: [
+      'Canje en 1 clic administrado por cada directiva',
+      'Comprobante HTML automático por correo',
+      'Historial auditable de beneficios utilizados',
+    ],
   },
   {
     id: 'legal',
     icon: '⚖️',
-    titulo: 'Asesoría legal y actas',
-    desc: 'Acceso a respaldo jurídico, actas y asambleas de manera abierta y segura.',
-    modulo: 'Libro de Actas + Asistente Legal IA',
+    titulo: 'Asesoría legal IA y actas',
+    desc: 'Orientación sobre el Código del Trabajo chileno 24/7, actas digitales y mesa de tickets.',
+    modulo: 'Asistente Legal IA + Libro de Actas & Soporte',
     detalle:
-      'Consulta de normativa laboral chilena 24/7, biblioteca de documentos oficiales y archivo histórico de asambleas.',
-    bullets: ['Orientación laboral inmediata', 'Documentos oficiales descargables', 'Trazabilidad total por sindicato'],
+      'Consulta rápida de normativa laboral chilena, repositorio documental de la directiva y resolución de tickets con notificación directa al socio.',
+    bullets: [
+      'Orientación laboral inmediata contextualizada en Chile',
+      'Documentos y actas oficiales descargables',
+      'Mesa de tickets con seguimiento por correo',
+    ],
   },
   {
     id: 'democracia',
     icon: '🗳️',
-    titulo: 'Democracia interna',
-    desc: 'Votaciones digitales, encuestas y control de asistencia QR en asambleas.',
-    modulo: 'Asambleas QR + Votación Digital',
+    titulo: 'Asambleas QR y votaciones',
+    desc: 'Escáner de credencial digital en tiempo real, encuestas y votaciones verificadas por RUT.',
+    modulo: 'Credencial Digital QR + Control de Quórum',
     detalle:
-      'Escáner rápido de credencial para registrar asistencia al instante y votaciones verificadas con un voto por RUT.',
-    bullets: ['Credencial digital QR por socio', 'Control de quórum en tiempo real', 'Encuestas de clima laboral'],
+      'Registra entrada y salida en asambleas en segundos mediante escáner QR y ejecuta votaciones internas con un voto único por RUT.',
+    bullets: [
+      'Credencial digital QR individual por socio',
+      'Control de quórum y asistencia en tiempo real',
+      'Encuestas y votaciones transparentes',
+    ],
   },
 ];
 
@@ -220,17 +269,17 @@ const PASOS_TRIAL = [
   {
     num: '01',
     titulo: 'Solicitas tu Trial ($0 hoy)',
-    desc: 'Ingresas los datos del dirigente titular, tu sindicato y validas tu tarjeta sin cobro durante 30 días.',
+    desc: 'Registras al dirigente titular, tu organización y validas el alta de forma segura con Webpay Plus.',
   },
   {
     num: '02',
-    titulo: 'Recibes 2 credenciales por Gmail',
-    desc: 'El SuperAdmin aprueba tu orden y te envía las credenciales del sindicato, tu clave de admin y el link único.',
+    titulo: 'Recibes credenciales cifradas por correo',
+    desc: 'Aprobamos tu orden y despachamos tu ID institucional, tu código privado Bcrypt y el acceso único.',
   },
   {
     num: '03',
-    titulo: 'Activas tu organización al instante',
-    desc: 'Validas el enlace una sola vez y quedas habilitado como Administrador Único con tus módulos listos.',
+    titulo: 'Activas tu sindicato al instante',
+    desc: 'Validas el código una sola vez, quedas como Administrador Único y habilitas el ingreso a tus socios.',
   },
 ];
 
@@ -244,7 +293,12 @@ const PLANES_PREVIEW = [
     ahorro: 9980,
     socios: 'Hasta 25 socios',
     destacado: false,
-    items: ['1 Administrador único', 'Login de socios por RUT', 'Beneficios y Credencial QR', 'Mesa de soporte'],
+    items: [
+      '1 Administrador único validado',
+      'Login de socios por RUT + Bcrypt',
+      'Beneficios y Credencial QR',
+      'Mesa de soporte con correos',
+    ],
   },
   {
     id: 'estandar',
@@ -255,18 +309,28 @@ const PLANES_PREVIEW = [
     ahorro: 19980,
     socios: 'Hasta 50 socios',
     destacado: true,
-    items: ['Todo lo de Básico', 'Actas y Asistencia QR', 'Votaciones y Encuestas', 'Fondo Solidario'],
+    items: [
+      'Todo lo incluido en Básico',
+      'Actas y Asistencia QR en vivo',
+      'Votaciones y Encuestas',
+      'Fondo Solidario y Comunicados',
+    ],
   },
   {
     id: 'premium',
     nombre: 'Premium',
-    desc: 'Máximo control, IA legal y personalización total.',
+    desc: 'Máximo control, IA legal y personalización total de marca.',
     mensual: 14990,
     anual: 149900,
     ahorro: 29980,
     socios: 'Socios ilimitados',
     destacado: false,
-    items: ['Todos los módulos (10/10)', 'Asistente Legal IA 24/7', 'Finanzas y Negociación', 'Estudio UI personalizado'],
+    items: [
+      'Suite completa (10/10 módulos)',
+      'Asistente Legal IA 24/7',
+      'Finanzas y Negociación',
+      'Estudio UI personalizado en vivo',
+    ],
   },
 ];
 
@@ -290,7 +354,7 @@ const styles = {
   },
   navCta: {
     fontSize: '0.78125rem',
-    fontWeight: 550 as const,
+    fontWeight: 600 as const,
     letterSpacing: '-0.005em',
     padding: '7px 14px',
     borderRadius: '8px',
@@ -300,36 +364,36 @@ const styles = {
     alignItems: 'center',
     gap: '8px',
     fontSize: '0.6875rem',
-    fontWeight: 550 as const,
+    fontWeight: 600 as const,
     letterSpacing: '0.06em',
     textTransform: 'uppercase' as const,
     padding: '5px 12px',
     borderRadius: '999px',
-    background: 'rgba(201, 148, 10, 0.10)',
-    border: '1px solid rgba(201, 148, 10, 0.24)',
+    background: 'rgba(201, 148, 10, 0.12)',
+    border: '1px solid rgba(201, 148, 10, 0.28)',
     color: '#e5b32a',
   },
   heroTitle: {
-    fontSize: 'clamp(1.9rem, 3.4vw, 2.7rem)',
-    fontWeight: 600 as const,
-    lineHeight: 1.12,
+    fontSize: 'clamp(1.95rem, 3.5vw, 2.85rem)',
+    fontWeight: 650 as const,
+    lineHeight: 1.1,
     letterSpacing: '-0.03em',
     marginTop: '14px',
   },
   heroSub: {
-    fontSize: '0.875rem',
+    fontSize: '0.89rem',
     fontWeight: 400 as const,
-    lineHeight: 1.6,
+    lineHeight: 1.62,
     letterSpacing: '-0.008em',
-    color: 'rgba(244, 245, 247, 0.68)',
-    maxWidth: '470px',
+    color: 'rgba(244, 245, 247, 0.72)',
+    maxWidth: '500px',
     marginTop: '12px',
   },
   btnPrimary: {
     fontSize: '0.8125rem',
     fontWeight: 600 as const,
     letterSpacing: '-0.01em',
-    padding: '10px 17px',
+    padding: '10px 18px',
     borderRadius: '8px',
   },
   btnGhost: {
@@ -341,7 +405,7 @@ const styles = {
   },
   statNum: {
     fontSize: '1.25rem',
-    fontWeight: 600 as const,
+    fontWeight: 650 as const,
     letterSpacing: '-0.025em',
     fontVariantNumeric: 'tabular-nums' as const,
   },
@@ -359,8 +423,8 @@ const styles = {
     color: '#d49d12',
   },
   sectionTitle: {
-    fontSize: 'clamp(1.35rem, 2.2vw, 1.8rem)',
-    fontWeight: 600 as const,
+    fontSize: 'clamp(1.35rem, 2.2vw, 1.85rem)',
+    fontWeight: 650 as const,
     lineHeight: 1.2,
     letterSpacing: '-0.025em',
     marginTop: '6px',
@@ -466,6 +530,7 @@ const styles = {
 
 type DrawerMode = 'login' | 'validar_socio';
 type ValInputMode = 'rut' | 'email';
+type LegalTab = 'terminos' | 'privacidad';
 
 interface SocioValidadoInfo {
   fullName: string;
@@ -474,6 +539,14 @@ interface SocioValidadoInfo {
   sindicatoId: number;
   sindicatoNombre: string;
   yaVerificado: boolean;
+}
+
+interface CookiePrefs {
+  esenciales: true;
+  preferencias: boolean;
+  analitica: boolean;
+  estado: 'accepted' | 'rejected' | 'custom';
+  fecha: string;
 }
 
 // ─── COMPONENTE PRINCIPAL ──────────────────────────────────────────────────────
@@ -506,11 +579,59 @@ function LandingPage() {
   const [pasoTrialActivo, setPasoTrialActivo] = useState(0);
   const [cicloPlanes, setCicloPlanes] = useState<'mensual' | 'anual'>('mensual');
 
+  // Estados de Cookies y Modal Legal (Términos y Privacidad)
+  const [cookieBannerOpen, setCookieBannerOpen] = useState(false);
+  const [cookieConfigOpen, setCookieConfigOpen] = useState(false);
+  const [cookiePrefUI, setCookiePrefUI] = useState(true);
+  const [cookieAnalitica, setCookieAnalitica] = useState(false);
+  const [legalModal, setLegalModal] = useState<LegalTab | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useCityCanvas(canvasRef);
 
   const searchParams = useSearchParams();
   const redirectDestino = searchParams.get('redirect');
+
+  // Mostrar banner de cookies si el usuario aún no decide
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(COOKIE_STORAGE_KEY);
+      if (!saved) {
+        const t = setTimeout(() => setCookieBannerOpen(true), 450);
+        return () => clearTimeout(t);
+      }
+      const parsed = JSON.parse(saved) as CookiePrefs;
+      setCookiePrefUI(Boolean(parsed.preferencias));
+      setCookieAnalitica(Boolean(parsed.analitica));
+    } catch {
+      setCookieBannerOpen(true);
+    }
+  }, []);
+
+  const guardarCookies = (
+    estado: 'accepted' | 'rejected' | 'custom',
+    prefUI: boolean,
+    analitica: boolean
+  ) => {
+    const payload: CookiePrefs = {
+      esenciales: true,
+      preferencias: prefUI,
+      analitica,
+      estado,
+      fecha: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem(COOKIE_STORAGE_KEY, JSON.stringify(payload));
+      const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
+      document.cookie = `snoverus-consent=${estado}; path=/; max-age=15552000; SameSite=Lax${secureFlag}`;
+    } catch {
+      // Ignorar si el navegador bloquea almacenamiento en modo privado
+    }
+    setCookiePrefUI(prefUI);
+    setCookieAnalitica(analitica);
+    setCookieConfigOpen(false);
+    setCookieBannerOpen(false);
+  };
 
   // Auto-abrir el drawer en modo validador si llega con ?validar=socio
   useEffect(() => {
@@ -540,18 +661,21 @@ function LandingPage() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDrawerOpen(false);
+      if (e.key === 'Escape') {
+        if (legalModal) setLegalModal(null);
+        else setDrawerOpen(false);
+      }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, []);
+  }, [legalModal]);
 
   useEffect(() => {
-    document.body.style.overflow = drawerOpen ? 'hidden' : '';
+    document.body.style.overflow = drawerOpen || legalModal ? 'hidden' : '';
     return () => {
       document.body.style.overflow = '';
     };
-  }, [drawerOpen]);
+  }, [drawerOpen, legalModal]);
 
   const abrirDrawer = (modo: DrawerMode = 'login') => {
     setErrorMsg('');
@@ -656,12 +780,12 @@ function LandingPage() {
       await supabase.auth.signOut();
       setSindicatoPendiente(true);
       throw new Error(
-        'Tu organización aún está pendiente de activación. Valida tu sindicato con el código PYC enviado a tu correo.'
+        'Tu organización aún está pendiente de activación. Valida tu sindicato con el código enviado a tu correo.'
       );
     }
 
     // 2. Solo socios pendientes de verificación de correo requieren el código de 6 dígitos
-    //    (Admins que ya activaron su sindicato con PYC-XXXXXX entran directo a /dashboard/admin)
+    //    (Admins que ya activaron su sindicato entran directo a /dashboard/admin)
     const requiereCodigoSocio =
       estadoUsuario === 'pendiente_correo' ||
       (rolUsuario === 'socio' && profileData.email_verificado === false);
@@ -728,8 +852,13 @@ function LandingPage() {
       }
     }
 
-    document.cookie = `sb-sindicato-session=${authData.user.email}; path=/; max-age=86400`;
-    document.cookie = `sb-sindicato-rol=${profileData.role || 'socio'}; path=/; max-age=86400`;
+    const secureFlag = window.location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `sb-sindicato-session=${encodeURIComponent(
+      authData.user.email || ''
+    )}; path=/; max-age=86400; SameSite=Lax${secureFlag}`;
+    document.cookie = `sb-sindicato-rol=${encodeURIComponent(
+      profileData.role || 'socio'
+    )}; path=/; max-age=86400; SameSite=Lax${secureFlag}`;
 
     if (profileData.sindicato_id) {
       localStorage.setItem('sindicato_activo', String(profileData.sindicato_id));
@@ -892,25 +1021,39 @@ function LandingPage() {
 
   return (
     <div style={styles.page}>
-      {/* ── NAVBAR ── */}
+      {/* ── NAVBAR CORPORATIVA SNOVERUS ── */}
       <nav className="pyc-nav">
-        <div className="pyc-nav-brand">
-          <div className="pyc-nav-mark" style={{ fontSize: '0.75rem', fontWeight: 700 }}>
-            PYC
+        <div className="pyc-nav-brand" style={{ gap: '10px' }}>
+          <BrandMark size={28} />
+          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+            <span
+              className="pyc-nav-name"
+              style={{ fontSize: '0.92rem', fontWeight: 700, letterSpacing: '-0.02em' }}
+            >
+              {BRAND_NAME}
+              <span style={{ color: '#e5b32a', fontSize: '0.62rem', verticalAlign: 'super', marginLeft: '2px' }}>
+                ®
+              </span>
+            </span>
+            <span
+              style={{
+                fontSize: '0.58rem',
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: 'rgba(244, 245, 247, 0.45)',
+                fontFamily: 'monospace',
+              }}
+            >
+              Union Cloud SaaS
+            </span>
           </div>
-          <span
-            className="pyc-nav-name"
-            style={{ fontSize: '0.875rem', fontWeight: 600, letterSpacing: '-0.015em' }}
-          >
-            Sindicato PYC
-          </span>
         </div>
         <ul className="pyc-nav-links">
           <li>
             <a href="#" style={styles.navLink}>Inicio</a>
           </li>
           <li>
-            <a href="#nosotros" style={styles.navLink}>Nosotros</a>
+            <a href="#nosotros" style={styles.navLink}>Plataforma</a>
           </li>
           <li>
             <a
@@ -964,13 +1107,15 @@ function LandingPage() {
                 background: '#e5b32a',
               }}
             />
-            <span>Plataforma SaaS Gremial</span>
+            <span>Infraestructura SaaS Multi-Tenant · Chile</span>
           </div>
           <h1 className="pyc-hero-title" style={styles.heroTitle}>
-            Tu sindicato, <em style={{ fontStyle: 'normal', color: '#e5b32a' }}>unido</em> y digital
+            El ecosistema digital para{' '}
+            <em style={{ fontStyle: 'normal', color: '#e5b32a' }}>sindicatos</em> modernos
           </h1>
           <p className="pyc-hero-sub" style={styles.heroSub}>
-            Gestiona beneficios con comprobantes automáticos, votaciones, asistencia QR, actas y asesoría legal en un solo lugar.
+            {BRAND_NAME} centraliza padrones aislados, beneficios con comprobantes automáticos,
+            asistencia QR, votaciones y asistencia legal IA en una nube segura para cada organización.
           </p>
           <div className="pyc-hero-actions" style={{ marginTop: '22px', gap: '10px', flexWrap: 'wrap' }}>
             <button className="pyc-btn-primary" style={styles.btnPrimary} onClick={() => abrirDrawer('login')}>
@@ -1012,9 +1157,9 @@ function LandingPage() {
         >
           <div className="pyc-stat">
             <div className="pyc-stat-num" style={styles.statNum}>
-              +<span style={{ color: '#e5b32a' }}>240</span>
+              <span style={{ color: '#e5b32a' }}>100%</span>
             </div>
-            <div className="pyc-stat-label" style={styles.statLabel}>Socios activos</div>
+            <div className="pyc-stat-label" style={styles.statLabel}>Aislamiento RLS</div>
           </div>
           <div className="pyc-stat">
             <div className="pyc-stat-num" style={styles.statNum}>
@@ -1031,17 +1176,60 @@ function LandingPage() {
         </motion.div>
       </section>
 
-      {/* ── SOBRE NOSOTROS (INTERACTIVO) ── */}
+      {/* ── FRANJA DE ESTÁNDARES Y SEGURIDAD SNOVERUS ── */}
+      <div
+        style={{
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          background: 'rgba(255,255,255,0.015)',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: '1120px',
+            margin: '0 auto',
+            padding: '14px 24px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            fontSize: '0.73rem',
+            color: 'rgba(244,245,247,0.6)',
+          }}
+        >
+          <span
+            style={{
+              fontFamily: 'monospace',
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              color: '#e5b32a',
+              fontWeight: 600,
+            }}
+          >
+            Estándar {BRAND_NAME}®
+          </span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px' }}>
+            <span>✓ PostgreSQL Multi-Tenant (RLS)</span>
+            <span>✓ Verificación Bcrypt</span>
+            <span>✓ Pagos Webpay Plus</span>
+            <span>✓ Cumplimiento Ley 21.719</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── SOBRE LA PLATAFORMA (INTERACTIVO) ── */}
       <section className="pyc-section" id="nosotros">
-        <div style={styles.sectionTag}>Sobre la plataforma</div>
+        <div style={styles.sectionTag}>Tecnología {BRAND_NAME}</div>
         <h2 className="pyc-section-title" style={styles.sectionTitle}>
-          Creada para representar a quienes trabajan
+          Diseñada para escalar sindicatos con total independencia
         </h2>
 
         <div className="pyc-nosotros-grid" style={{ marginTop: '28px', alignItems: 'start' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
             <p style={styles.bodyText}>
-              Sindicato PYC reúne en un solo espacio multi-organización todo lo que una directiva y sus socios necesitan. Haz clic en cualquiera de los 4 pilares para explorar cómo funciona por dentro.
+              {BRAND_NAME} entrega a cada organización sindical su propia plataforma privada bajo una
+              arquitectura multi-tenant patentable. Explora los 4 pilares operativos haciendo clic en cada tarjeta.
             </p>
 
             <AnimatePresence mode="wait">
@@ -1053,9 +1241,9 @@ function LandingPage() {
                 transition={{ duration: 0.22 }}
                 style={{
                   background: '#11141d',
-                  border: '1px solid rgba(229, 179, 42, 0.25)',
+                  border: '1px solid rgba(229, 179, 42, 0.28)',
                   borderRadius: '14px',
-                  padding: '20px',
+                  padding: '22px',
                 }}
               >
                 <div
@@ -1214,7 +1402,7 @@ function LandingPage() {
               </div>
 
               <h2 style={{ ...styles.sectionTitle, fontSize: 'clamp(1.5rem, 2.6vw, 2rem)', marginTop: 0 }}>
-                Prueba Sindicato PYC gratis durante <span style={{ color: '#e5b32a' }}>30 días</span>
+                Prueba {BRAND_NAME} gratis durante <span style={{ color: '#e5b32a' }}>30 días</span>
               </h2>
               <p style={{ ...styles.bodyText, marginTop: '10px', marginBottom: '18px' }}>
                 Digitaliza tu organización sin pagar el primer mes. Te asignamos una{' '}
@@ -1368,7 +1556,7 @@ function LandingPage() {
       {/* ── PLANES INTERACTIVOS ── */}
       <section className="pyc-section" id="planes">
         <div style={{ textAlign: 'center', maxWidth: '620px', margin: '0 auto' }}>
-          <div style={styles.sectionTag}>Planes para tu organización</div>
+          <div style={styles.sectionTag}>Licenciamiento {BRAND_NAME}</div>
           <h2 style={{ ...styles.sectionTitle, marginTop: '8px' }}>
             Escala a tu ritmo, sin letra chica
           </h2>
@@ -1607,10 +1795,601 @@ function LandingPage() {
         </div>
       </div>
 
-      <div className="pyc-footer-bottom" style={{ fontSize: '0.75rem', color: 'rgba(244, 245, 247, 0.48)' }}>
-        <span>© 2026 Sindicato PYC. Todos los derechos reservados.</span>
-        <span>Desarrollado por equipo Capstone · Duoc UC</span>
+      {/* ── FOOTER CORPORATIVO Y LEGAL ── */}
+      <div
+        className="pyc-footer-bottom"
+        style={{
+          fontSize: '0.75rem',
+          color: 'rgba(244, 245, 247, 0.52)',
+          flexWrap: 'wrap',
+          gap: '14px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <BrandMark size={20} />
+          <span>
+            © 2026 <strong style={{ color: '#e2e8f0' }}>{BRAND_LEGAL}</strong> · Marca y arquitectura registradas.
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setLegalModal('terminos')}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'rgba(244,245,247,0.7)',
+              fontSize: '0.75rem',
+              cursor: 'pointer',
+              padding: 0,
+              textDecoration: 'underline',
+              textUnderlineOffset: '3px',
+            }}
+          >
+            Términos y Condiciones
+          </button>
+          <button
+            type="button"
+            onClick={() => setLegalModal('privacidad')}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'rgba(244,245,247,0.7)',
+              fontSize: '0.75rem',
+              cursor: 'pointer',
+              padding: 0,
+              textDecoration: 'underline',
+              textUnderlineOffset: '3px',
+            }}
+          >
+            Privacidad y Patente
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCookieConfigOpen(true);
+              setCookieBannerOpen(true);
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#e5b32a',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            Gestionar Cookies
+          </button>
+        </div>
       </div>
+
+      {/* ══════════════════════════════════════════
+          BANNER DE COOKIES (ACEPTAR / RECHAZAR / CONFIGURAR)
+      ══════════════════════════════════════════ */}
+      <AnimatePresence>
+        {cookieBannerOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 24 }}
+            transition={{ duration: 0.25 }}
+            style={{
+              position: 'fixed',
+              right: '20px',
+              bottom: '20px',
+              left: '20px',
+              maxWidth: '430px',
+              marginLeft: 'auto',
+              zIndex: 90,
+              background: 'rgba(17, 20, 29, 0.97)',
+              backdropFilter: 'blur(14px)',
+              border: '1px solid rgba(229, 179, 42, 0.32)',
+              borderRadius: '16px',
+              padding: '18px 20px',
+              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.65)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <BrandMark size={20} />
+                <strong style={{ fontSize: '0.84rem', color: '#ffffff' }}>
+                  Cookies y Privacidad · {BRAND_NAME}®
+                </strong>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.62rem',
+                  fontFamily: 'monospace',
+                  color: '#e5b32a',
+                  background: 'rgba(229,179,42,0.12)',
+                  border: '1px solid rgba(229,179,42,0.3)',
+                  padding: '2px 7px',
+                  borderRadius: '999px',
+                }}
+              >
+                Ley 21.719
+              </span>
+            </div>
+
+            <p
+              style={{
+                fontSize: '0.74rem',
+                color: 'rgba(244,245,247,0.68)',
+                lineHeight: 1.5,
+                margin: '10px 0 12px',
+              }}
+            >
+              Usamos cookies esenciales para resguardar tu sesión y aislar cada sindicato. Puedes aceptar
+              las cookies opcionales o rechazarlas libremente. Revisa nuestros{' '}
+              <button
+                type="button"
+                onClick={() => setLegalModal('terminos')}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#f3c64f',
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  padding: 0,
+                  fontSize: 'inherit',
+                }}
+              >
+                Términos
+              </button>{' '}
+              y{' '}
+              <button
+                type="button"
+                onClick={() => setLegalModal('privacidad')}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#f3c64f',
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  padding: 0,
+                  fontSize: 'inherit',
+                }}
+              >
+                Política de Privacidad
+              </button>
+              .
+            </p>
+
+            {cookieConfigOpen && (
+              <div
+                style={{
+                  borderTop: '1px solid rgba(255,255,255,0.08)',
+                  paddingTop: '12px',
+                  marginBottom: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '8px 10px',
+                    borderRadius: '10px',
+                    background: 'rgba(255,255,255,0.03)',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#fff' }}>
+                      Cookies Esenciales
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
+                      Sesión, rol y seguridad multi-tenant.
+                    </div>
+                  </div>
+                  <span style={{ fontSize: '0.66rem', color: '#34d399', fontFamily: 'monospace' }}>
+                    Activas
+                  </span>
+                </div>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '8px 10px',
+                    borderRadius: '10px',
+                    background: 'rgba(255,255,255,0.03)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#fff' }}>
+                      Preferencias de Interfaz
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
+                      Recuerda tema visual y sindicato activo.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={cookiePrefUI}
+                    onChange={(e) => setCookiePrefUI(e.target.checked)}
+                    style={{ accentColor: '#e5b32a', width: '15px', height: '15px', cursor: 'pointer' }}
+                  />
+                </label>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '8px 10px',
+                    borderRadius: '10px',
+                    background: 'rgba(255,255,255,0.03)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#fff' }}>
+                      Métricas de Rendimiento
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
+                      Telemetría anónima de estabilidad.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={cookieAnalitica}
+                    onChange={(e) => setCookieAnalitica(e.target.checked)}
+                    style={{ accentColor: '#e5b32a', width: '15px', height: '15px', cursor: 'pointer' }}
+                  />
+                </label>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {cookieConfigOpen ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => guardarCookies('custom', cookiePrefUI, cookieAnalitica)}
+                    style={{
+                      flex: 1,
+                      padding: '9px 12px',
+                      borderRadius: '9px',
+                      border: 'none',
+                      background: '#e5b32a',
+                      color: '#0b0d12',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Guardar preferencias
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => guardarCookies('rejected', false, false)}
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: '9px',
+                      border: '1px solid rgba(255,255,255,0.14)',
+                      background: 'rgba(255,255,255,0.05)',
+                      color: '#e2e8f0',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Rechazar opcionales
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => guardarCookies('accepted', true, true)}
+                    style={{
+                      flex: 1,
+                      padding: '9px 12px',
+                      borderRadius: '9px',
+                      border: 'none',
+                      background: '#e5b32a',
+                      color: '#0b0d12',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Aceptar todas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => guardarCookies('rejected', false, false)}
+                    style={{
+                      flex: 1,
+                      padding: '9px 12px',
+                      borderRadius: '9px',
+                      border: '1px solid rgba(255,255,255,0.14)',
+                      background: 'rgba(255,255,255,0.05)',
+                      color: '#e2e8f0',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Rechazar opcionales
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCookieConfigOpen(true)}
+                    style={{
+                      width: '100%',
+                      padding: '6px',
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#94a3b8',
+                      fontSize: '0.71rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Configurar cookies manualmente
+                  </button>
+                </>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ══════════════════════════════════════════
+          MODAL LEGAL: TÉRMINOS, PATENTE Y PRIVACIDAD
+      ══════════════════════════════════════════ */}
+      <AnimatePresence>
+        {legalModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setLegalModal(null)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 110,
+              background: 'rgba(4, 6, 10, 0.78)',
+              backdropFilter: 'blur(6px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '18px',
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 14, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 14, scale: 0.98 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%',
+                maxWidth: '660px',
+                maxHeight: '84vh',
+                display: 'flex',
+                flexDirection: 'column',
+                background: '#11141d',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: '18px',
+                overflow: 'hidden',
+                boxShadow: '0 28px 70px rgba(0,0,0,0.7)',
+              }}
+            >
+              <div
+                style={{
+                  padding: '16px 22px',
+                  borderBottom: '1px solid rgba(255,255,255,0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <BrandMark size={24} />
+                  <div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>
+                      Marco Legal y Propiedad Intelectual · {BRAND_NAME}®
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontFamily: 'monospace' }}>
+                      {BRAND_LEGAL} · Santiago, Chile
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLegalModal(null)}
+                  style={{
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'rgba(255,255,255,0.04)',
+                    color: '#cbd5e1',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '6px',
+                  padding: '12px 22px 0',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setLegalModal('terminos')}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    fontSize: '0.76rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    background: legalModal === 'terminos' ? '#e5b32a' : 'rgba(255,255,255,0.05)',
+                    color: legalModal === 'terminos' ? '#0b0d12' : '#cbd5e1',
+                  }}
+                >
+                  Términos y Patente
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLegalModal('privacidad')}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    fontSize: '0.76rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    background: legalModal === 'privacidad' ? '#e5b32a' : 'rgba(255,255,255,0.05)',
+                    color: legalModal === 'privacidad' ? '#0b0d12' : '#cbd5e1',
+                  }}
+                >
+                  Privacidad y Cookies
+                </button>
+              </div>
+
+              <div
+                style={{
+                  padding: '18px 22px 22px',
+                  overflowY: 'auto',
+                  fontSize: '0.8rem',
+                  lineHeight: 1.65,
+                  color: '#cbd5e1',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '14px',
+                }}
+              >
+                {legalModal === 'terminos' ? (
+                  <>
+                    <div>
+                      <h4 style={{ color: '#fff', margin: '0 0 4px', fontSize: '0.86rem' }}>
+                        1. Naturaleza del Servicio SaaS Multi-Tenant
+                      </h4>
+                      <p style={{ margin: 0 }}>
+                        <strong>{BRAND_NAME}®</strong> es una plataforma de software como servicio
+                        operada por <strong>{BRAND_LEGAL}</strong>. Cada sindicato contratante recibe
+                        una instancia lógica aislada e independiente identificada por su propio ID
+                        institucional, siendo cada organización cliente distinta de la compañía
+                        proveedora.
+                      </p>
+                    </div>
+                    <div>
+                      <h4 style={{ color: '#fff', margin: '0 0 4px', fontSize: '0.86rem' }}>
+                        2. Propiedad Intelectual, Marca y Derechos Reservados
+                      </h4>
+                      <p style={{ margin: 0 }}>
+                        El código fuente, arquitectura multi-tenant, interfaces UI/UX, flujos de
+                        validación criptográfica y signos distintivos de <strong>{BRAND_NAME}®</strong>{' '}
+                        son propiedad exclusiva de <strong>{BRAND_LEGAL}</strong>, amparados por la
+                        Ley N.º 17.336 sobre Propiedad Intelectual y la Ley N.º 19.039 sobre
+                        Propiedad Industrial en Chile (registro marcario y de arquitectura ante INAPI).
+                        Se prohíbe su reproducción, copia o sublicenciamiento sin autorización escrita.
+                      </p>
+                    </div>
+                    <div>
+                      <h4 style={{ color: '#fff', margin: '0 0 4px', fontSize: '0.86rem' }}>
+                        3. Planes, Trial de 30 días y Pagos Webpay Plus
+                      </h4>
+                      <p style={{ margin: 0 }}>
+                        Los módulos disponibles dependen del plan vigente (Básico, Estándar, Premium o
+                        Trial promocional de 30 días). Los pagos electrónicos se procesan vía{' '}
+                        <strong>Webpay Plus (Transbank)</strong>; {BRAND_NAME} no almacena datos
+                        completos de tarjetas bancarias.
+                      </p>
+                    </div>
+                    <div>
+                      <h4 style={{ color: '#fff', margin: '0 0 4px', fontSize: '0.86rem' }}>
+                        4. Gobierno de Cuentas y Asistencia Legal IA
+                      </h4>
+                      <p style={{ margin: 0 }}>
+                        Cada sindicato valida un Administrador Único mediante código de un solo uso
+                        (Bcrypt). Las respuestas del Asistente Legal IA tienen carácter referencial
+                        conforme al Código del Trabajo chileno y no sustituyen patrocinio jurídico
+                        presencial.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <h4 style={{ color: '#fff', margin: '0 0 4px', fontSize: '0.86rem' }}>
+                        1. Protección de Datos (Ley 19.628 y Ley 21.719)
+                      </h4>
+                      <p style={{ margin: 0 }}>
+                        Tratamos únicamente los datos necesarios para gestionar la afiliación y
+                        servicios sindicales: nombre, RUT, correo electrónico, teléfono, rol,
+                        asistencias QR, solicitudes de beneficios y tickets de soporte.
+                      </p>
+                    </div>
+                    <div>
+                      <h4 style={{ color: '#fff', margin: '0 0 4px', fontSize: '0.86rem' }}>
+                        2. Seguridad y Aislamiento Técnico
+                      </h4>
+                      <p style={{ margin: 0 }}>
+                        Las bases de datos aplican aislamiento por fila (<strong>PostgreSQL RLS</strong>)
+                        asociado a cada organización, cifrado irreversible <strong>Bcrypt</strong> para
+                        claves y códigos temporales, y transporte cifrado HTTPS/TLS.
+                      </p>
+                    </div>
+                    <div>
+                      <h4 style={{ color: '#fff', margin: '0 0 4px', fontSize: '0.86rem' }}>
+                        3. Política de Cookies
+                      </h4>
+                      <p style={{ margin: 0 }}>
+                        Utilizamos cookies esenciales (autenticación, rol y protección de sesión) y
+                        cookies opcionales (preferencias de interfaz y métricas anónimas) que puedes
+                        aceptar, rechazar o modificar en cualquier momento desde el botón{' '}
+                        <strong>Gestionar Cookies</strong>.
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div
+                style={{
+                  padding: '12px 22px',
+                  borderTop: '1px solid rgba(255,255,255,0.08)',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setLegalModal(null)}
+                  style={{
+                    padding: '9px 18px',
+                    borderRadius: '9px',
+                    border: 'none',
+                    background: '#e5b32a',
+                    color: '#0b0d12',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Entendido
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ══════════════════════════════════════════
           DRAWER UNIFICADO: INICIAR SESIÓN + VALIDADOR DE SOCIOS
@@ -1641,12 +2420,13 @@ function LandingPage() {
                 className="pyc-drawer-header"
                 style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.06)', padding: '16px 24px' }}
               >
-                <div className="pyc-drawer-brand" style={{ gap: '8px' }}>
-                  <div className="pyc-drawer-mark" style={{ fontSize: '0.7rem', fontWeight: 700 }}>
-                    PYC
-                  </div>
-                  <span style={{ fontWeight: 600, fontSize: '0.84375rem', letterSpacing: '-0.015em' }}>
-                    Sindicato PYC
+                <div className="pyc-drawer-brand" style={{ gap: '9px' }}>
+                  <BrandMark size={24} />
+                  <span style={{ fontWeight: 700, fontSize: '0.88rem', letterSpacing: '-0.015em' }}>
+                    {BRAND_NAME}
+                    <span style={{ color: '#e5b32a', fontSize: '0.62rem', verticalAlign: 'super', marginLeft: '2px' }}>
+                      ®
+                    </span>
                   </span>
                 </div>
                 <button
@@ -1769,7 +2549,7 @@ function LandingPage() {
                       exit={{ opacity: 0, x: 8 }}
                       transition={{ duration: 0.18 }}
                     >
-                      <div style={styles.drawerEyebrow}>Portal de Socios y Directiva</div>
+                      <div style={styles.drawerEyebrow}>Portal Multi-Sindicato · {BRAND_NAME}</div>
                       <h2 style={styles.drawerTitle}>Bienvenido de vuelta</h2>
                       <p style={styles.drawerSubtitle}>
                         {redirectDestino
@@ -2251,7 +3031,7 @@ function LandingPage() {
                     <span style={{ fontSize: '0.75rem', color: '#e5b32a' }}>→</span>
                   </div>
                   <p style={{ margin: '4px 0 0', fontSize: '0.7rem', color: '#94a3b8', lineHeight: 1.4 }}>
-                    Crea tu sindicato en modo Trial ($0 hoy) y recibe tus credenciales por Gmail.
+                    Crea tu sindicato en {BRAND_NAME} ($0 hoy) y recibe tus credenciales por correo.
                   </p>
                 </Link>
 
@@ -2286,6 +3066,51 @@ function LandingPage() {
                     Validar Sindicato
                   </Link>
                 </div>
+
+                {/* Nota legal dentro del drawer */}
+                <p
+                  style={{
+                    marginTop: '16px',
+                    fontSize: '0.67rem',
+                    color: 'rgba(244,245,247,0.42)',
+                    textAlign: 'center',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Al continuar aceptas los{' '}
+                  <button
+                    type="button"
+                    onClick={() => setLegalModal('terminos')}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#cbd5e1',
+                      textDecoration: 'underline',
+                      cursor: 'pointer',
+                      padding: 0,
+                      fontSize: 'inherit',
+                    }}
+                  >
+                    Términos del Servicio
+                  </button>{' '}
+                  y la{' '}
+                  <button
+                    type="button"
+                    onClick={() => setLegalModal('privacidad')}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#cbd5e1',
+                      textDecoration: 'underline',
+                      cursor: 'pointer',
+                      padding: 0,
+                      fontSize: 'inherit',
+                    }}
+                  >
+                    Política de Privacidad
+                  </button>{' '}
+                  de {BRAND_NAME}®.
+                </p>
               </div>
             </motion.div>
           </>
