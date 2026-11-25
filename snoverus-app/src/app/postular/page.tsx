@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -13,6 +13,13 @@ function formatRutSinPuntos(value: string): string {
   const body = clean.slice(0, -1);
   const dv = clean.slice(-1);
   return `${body}-${dv}`;
+}
+
+function formatRutConPuntos(clean: string): string {
+  if (clean.length <= 1) return clean;
+  const body = clean.slice(0, -1);
+  const dv = clean.slice(-1);
+  return `${body.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${dv}`;
 }
 
 function hasValidRutFormat(rut: string): boolean {
@@ -28,6 +35,11 @@ function formatTelefonoChileno(value: string): string {
   if (digits.length <= 1) return digits;
   if (digits.length <= 5) return `${digits.slice(0, 1)} ${digits.slice(1)}`;
   return `${digits.slice(0, 1)} ${digits.slice(1, 5)} ${digits.slice(5)}`;
+}
+
+function esSindicatoDisponible(s: SindicatoItem): boolean {
+  const est = String(s.estado || 'activo').trim().toLowerCase();
+  return est !== 'suspendido' && est !== 'pendiente_validacion';
 }
 
 const ETIQUETAS_MODULOS_UI: Record<string, string> = {
@@ -56,6 +68,7 @@ interface SindicatoItem {
 
 function PostularContent() {
   const searchParams = useSearchParams();
+  const lookupSeqRef = useRef(0);
 
   // Campos del formulario
   const [sindicatoId, setSindicatoId] = useState('');
@@ -70,6 +83,7 @@ function PostularContent() {
   // Estados de carga y UI
   const [sindicatos, setSindicatos] = useState<SindicatoItem[]>([]);
   const [cargandoSindicatos, setCargandoSindicatos] = useState(true);
+  const [buscandoId, setBuscandoId] = useState(false);
   const [avisoId, setAvisoId] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -78,9 +92,10 @@ function PostularContent() {
     fecha: string;
     sindicatoNombre: string;
     sindicatoId: number;
+    rolEnviado: 'socio' | 'admin';
   } | null>(null);
 
-  // 1. Cargar sindicatos activos y validados + detectar ?sid= en la URL
+  // 1. Cargar sindicatos activos + detectar ?sid= o ?id= en la URL
   useEffect(() => {
     async function cargarSindicatos() {
       setCargandoSindicatos(true);
@@ -92,23 +107,32 @@ function PostularContent() {
           .order('id', { ascending: true });
 
         if (!error && Array.isArray(data)) {
-          const visibles = (data as SindicatoItem[]).filter((s) => {
-            const est = String(s.estado || 'activo').trim().toLowerCase();
-            return est !== 'suspendido' && est !== 'pendiente_validacion' && s.validado !== false;
-          });
+          const todos = data as SindicatoItem[];
+          const visibles = todos.filter(esSindicatoDisponible);
           setSindicatos(visibles);
 
-          const paramSid = searchParams.get('sid') || searchParams.get('id');
+          const paramSid = (searchParams.get('sid') || searchParams.get('id') || '').replace(
+            /\D/g,
+            ''
+          );
           if (paramSid) {
-            const match = visibles.find((s) => String(s.id) === String(paramSid).trim());
-            if (match) {
-              setSindicatoId(String(match.id));
-              setBusquedaIdInput(String(match.id));
+            setBusquedaIdInput(paramSid);
+            const matchVisible = visibles.find((s) => String(s.id) === paramSid);
+            if (matchVisible) {
+              setSindicatoId(String(matchVisible.id));
               setAvisoId('');
             } else {
-              setAvisoId(
-                `El sindicato ID #${paramSid} no se encuentra activo o aún está pendiente de validación por su directiva.`
-              );
+              const matchEnTodos = todos.find((s) => String(s.id) === paramSid);
+              if (matchEnTodos) {
+                const est = String(matchEnTodos.estado || '').toLowerCase();
+                setAvisoId(
+                  est === 'suspendido'
+                    ? `El sindicato ID #${paramSid} se encuentra suspendido temporalmente.`
+                    : `El sindicato ID #${paramSid} aún está pendiente de validación por su directiva.`
+                );
+              } else {
+                setAvisoId(`No hay ningún sindicato activo con el ID #${paramSid}.`);
+              }
             }
           }
         }
@@ -119,28 +143,76 @@ function PostularContent() {
     cargarSindicatos();
   }, [searchParams]);
 
-  // Buscar y seleccionar sindicato directamente por su ID numérico
-  const handleBuscarPorId = (valor: string) => {
+  // Buscar y seleccionar sindicato por ID (en memoria y con fallback directo a Supabase)
+  const handleBuscarPorId = async (valor: string) => {
     const soloNumeros = valor.replace(/\D/g, '');
     setBusquedaIdInput(soloNumeros);
     setAvisoId('');
     setErrorMsg('');
 
+    const seq = ++lookupSeqRef.current;
+
     if (!soloNumeros) {
       setSindicatoId('');
+      setBuscandoId(false);
       return;
     }
 
-    const match = sindicatos.find((s) => String(s.id) === soloNumeros);
-    if (match) {
-      setSindicatoId(String(match.id));
-    } else {
-      setSindicatoId('');
-      setAvisoId(`No hay ningún sindicato activo con el ID #${soloNumeros}.`);
+    const matchLocal = sindicatos.find((s) => String(s.id) === soloNumeros);
+    if (matchLocal) {
+      setSindicatoId(String(matchLocal.id));
+      setBuscandoId(false);
+      return;
+    }
+
+    // Fallback en vivo a Supabase por si el sindicato se creó recién o aún cargaba la lista
+    setSindicatoId('');
+    setBuscandoId(true);
+    try {
+      const supabase = createClient();
+      const { data: directo, error } = await supabase
+        .from('sindicatos')
+        .select('*')
+        .eq('id', Number(soloNumeros))
+        .maybeSingle();
+
+      if (seq !== lookupSeqRef.current) return;
+
+      if (!error && directo) {
+        const sind = directo as SindicatoItem;
+        if (esSindicatoDisponible(sind)) {
+          setSindicatos((prev) =>
+            prev.some((p) => p.id === sind.id)
+              ? prev
+              : [...prev, sind].sort((a, b) => a.id - b.id)
+          );
+          setSindicatoId(String(sind.id));
+          setAvisoId('');
+        } else {
+          const est = String(sind.estado || '').toLowerCase();
+          setAvisoId(
+            est === 'suspendido'
+              ? `El sindicato ID #${soloNumeros} se encuentra suspendido temporalmente.`
+              : `El sindicato ID #${soloNumeros} aún está pendiente de validación por su directiva.`
+          );
+        }
+      } else {
+        setAvisoId(`No hay ningún sindicato activo con el ID #${soloNumeros}.`);
+      }
+    } catch {
+      if (seq === lookupSeqRef.current) {
+        setAvisoId(`No se pudo verificar el sindicato ID #${soloNumeros}. Intenta nuevamente.`);
+      }
+    } finally {
+      if (seq === lookupSeqRef.current) {
+        setBuscandoId(false);
+      }
     }
   };
 
   const handleSelectSindicato = (val: string) => {
+    lookupSeqRef.current += 1;
+    setBuscandoId(false);
     setSindicatoId(val);
     setBusquedaIdInput(val);
     setAvisoId('');
@@ -174,7 +246,7 @@ function PostularContent() {
   ].filter(Boolean).length;
   const porcentajeProgreso = Math.round((camposCompletos / 6) * 100);
 
-  // Enviar postulación a Supabase para revisión y aprobación del Admin
+  // Enviar postulación a Supabase para revisión y aprobación (Admin / SuperAdmin)
   const handlePostular = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -202,48 +274,58 @@ function PostularContent() {
     setLoading(true);
     const cleanRut = rut.replace(/[^0-9kK]/g, '').toUpperCase();
     const rutConGuion = `${cleanRut.slice(0, -1)}-${cleanRut.slice(-1)}`;
+    const rutConPuntos = formatRutConPuntos(cleanRut);
+    const emailNormalizado = email.trim().toLowerCase();
     const sidNum = Number(sindicatoActual.id);
 
     try {
       const supabase = createClient();
 
-      // 1. Verificar si ya es socio activo en ese sindicato (cualquier formato de RUT)
-      const { data: socioExistente } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('sindicato_id', sidNum)
-        .or(`rut.eq.${cleanRut},rut.eq.${rutConGuion}`)
-        .limit(1)
-        .maybeSingle();
+      // 1. Verificar si ya es miembro activo en ese sindicato (sin bloquear si RLS impide SELECT a anon)
+      try {
+        const { data: socioExistente } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('sindicato_id', sidNum)
+          .or(`rut.eq.${cleanRut},rut.eq.${rutConGuion},rut.eq.${rutConPuntos}`)
+          .limit(1)
+          .maybeSingle();
 
-      if (socioExistente) {
-        throw new Error(
-          `Este RUT ya figura como miembro activo en ${sindicatoActual.nombre}. Puedes iniciar sesión directamente.`
-        );
+        if (socioExistente) {
+          throw new Error(
+            `Este RUT ya figura como miembro activo en ${sindicatoActual.nombre}. Puedes iniciar sesión directamente.`
+          );
+        }
+      } catch (checkErr: any) {
+        if (checkErr?.message?.includes('miembro activo')) throw checkErr;
       }
 
-      // 2. Verificar si ya tiene postulación pendiente en ese sindicato
-      const { data: postulacionExistente } = await supabase
-        .from('postulaciones')
-        .select('id')
-        .eq('sindicato_id', sidNum)
-        .eq('estado', 'Pendiente')
-        .or(`rut.eq.${cleanRut},rut.eq.${rutConGuion}`)
-        .limit(1)
-        .maybeSingle();
+      // 2. Verificar si ya tiene postulación pendiente en ese sindicato (sin bloquear si RLS impide SELECT a anon)
+      try {
+        const { data: postulacionExistente } = await supabase
+          .from('postulaciones')
+          .select('id')
+          .eq('sindicato_id', sidNum)
+          .eq('estado', 'Pendiente')
+          .or(`rut.eq.${cleanRut},rut.eq.${rutConGuion},rut.eq.${rutConPuntos}`)
+          .limit(1)
+          .maybeSingle();
 
-      if (postulacionExistente) {
-        throw new Error(
-          `Ya tienes una postulación en revisión para ${sindicatoActual.nombre}. Espera la aprobación del administrador.`
-        );
+        if (postulacionExistente) {
+          throw new Error(
+            `Ya tienes una postulación en revisión para ${sindicatoActual.nombre}. Espera la aprobación correspondiente.`
+          );
+        }
+      } catch (checkErr: any) {
+        if (checkErr?.message?.includes('postulación en revisión')) throw checkErr;
       }
 
-      // 3. Insertar postulación en estado Pendiente para que le llegue al Admin del sindicato
+      // 3. Insertar postulación en estado Pendiente (Socio o Directiva/Presidente)
       const { error: insertError } = await supabase.from('postulaciones').insert([
         {
           rut: cleanRut,
           full_name: fullName.trim(),
-          email: email.trim().toLowerCase(),
+          email: emailNormalizado,
           telefono: `+56${telefonoLimpio}`,
           estado: 'Pendiente',
           sindicato_id: sidNum,
@@ -258,6 +340,7 @@ function PostularContent() {
         fecha: new Date().toLocaleString('es-CL'),
         sindicatoNombre: sindicatoActual.nombre,
         sindicatoId: sidNum,
+        rolEnviado: rolSolicitado,
       });
     } catch (err: any) {
       setErrorMsg(
@@ -326,10 +409,22 @@ function PostularContent() {
                 </span>
                 <h1 className="text-2xl font-bold text-white">¡Postulación Enviada!</h1>
                 <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                  Tu solicitud ya llegó al panel de administración de{' '}
-                  <strong className="text-white">{folioEnviado.sindicatoNombre}</strong>. Apenas el
-                  administrador valide tu RUT y la apruebe, recibirás tus credenciales en{' '}
-                  <strong className="text-[#e5b32a]">{email}</strong>.
+                  {folioEnviado.rolEnviado === 'admin' ? (
+                    <>
+                      Tu postulación a <strong className="text-[#e5b32a]">Directiva / Presidente</strong>{' '}
+                      para <strong className="text-white">{folioEnviado.sindicatoNombre}</strong> ya quedó
+                      registrada en el panel del <strong className="text-white">SuperAdmin y la Directiva</strong>.
+                      Apenas sea aprobada recibirás tu código de 6 dígitos y tus credenciales en{' '}
+                      <strong className="text-[#e5b32a]">{email}</strong>.
+                    </>
+                  ) : (
+                    <>
+                      Tu solicitud ya llegó al panel de administración de{' '}
+                      <strong className="text-white">{folioEnviado.sindicatoNombre}</strong>. Apenas la
+                      directiva valide tu RUT y la apruebe, recibirás tu código de 6 dígitos y tus credenciales en{' '}
+                      <strong className="text-[#e5b32a]">{email}</strong>.
+                    </>
+                  )}
                 </p>
               </div>
 
@@ -351,7 +446,9 @@ function PostularContent() {
                 <div className="flex justify-between gap-2">
                   <span className="text-slate-400">Rol solicitado:</span>
                   <span className="text-[#e5b32a] font-semibold uppercase font-mono">
-                    {rolSolicitado === 'admin' ? 'Presidente / Directiva' : 'Socio Trabajador'}
+                    {folioEnviado.rolEnviado === 'admin'
+                      ? 'Presidente / Directiva'
+                      : 'Socio Trabajador'}
                   </span>
                 </div>
                 <div className="flex justify-between gap-2 border-t border-white/[0.06] pt-2.5">
@@ -420,6 +517,8 @@ function PostularContent() {
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                         Verificado
                       </span>
+                    ) : buscandoId ? (
+                      <span className="text-[11px] font-mono text-[#e5b32a]">Buscando...</span>
                     ) : (
                       <span className="text-[11px] font-mono text-slate-500">Sin seleccionar</span>
                     )}
@@ -509,7 +608,7 @@ function PostularContent() {
                   </div>
                   <p className="text-[11px] text-slate-400">
                     {porcentajeProgreso === 100
-                      ? 'Todo listo. Ya puedes enviar tu postulación a la directiva.'
+                      ? 'Todo listo. Ya puedes enviar tu postulación a revisión.'
                       : 'Completa los campos obligatorios para habilitar el envío.'}
                   </p>
                 </div>
@@ -520,7 +619,7 @@ function PostularContent() {
                   <div className="space-y-2.5 text-xs text-slate-400">
                     <div className="flex items-start gap-2.5">
                       <span className="font-mono text-[#e5b32a] font-bold">01</span>
-                      <span>Tu solicitud entra al padrón privado del sindicato elegido.</span>
+                      <span>Tu solicitud entra al padrón del sindicato elegido y al panel SuperAdmin.</span>
                     </div>
                     <div className="flex items-start gap-2.5">
                       <span className="font-mono text-[#e5b32a] font-bold">02</span>
@@ -528,7 +627,7 @@ function PostularContent() {
                     </div>
                     <div className="flex items-start gap-2.5">
                       <span className="font-mono text-[#e5b32a] font-bold">03</span>
-                      <span>Recibes tu clave temporal por correo para entrar con tu RUT.</span>
+                      <span>Recibes tu código de 6 dígitos y clave temporal por correo para entrar con tu RUT.</span>
                     </div>
                   </div>
                 </div>
@@ -539,7 +638,7 @@ function PostularContent() {
                 <div className="pb-5 mb-6 border-b border-white/[0.07]">
                   <h2 className="text-lg font-bold text-white">Formulario de Ingreso</h2>
                   <p className="text-xs text-slate-400 mt-1">
-                    Todos los datos se envían directamente al administrador del sindicato seleccionado para su aprobación.
+                    Todos los datos se envían directamente al panel de revisión del sindicato seleccionado para su aprobación.
                   </p>
                 </div>
 
